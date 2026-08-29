@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+
+# Test, coverage, type-check, and notebook caches
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+/draftscope.toml
+
+# DraftScope downloads and every runtime/generated artifact. This includes
+# player boards, reports, snapshots, historical model rows, model releases,
+# forecast inputs/ledgers, state, logs, and user-edited team profiles.
+/.draftscope-cache/
+/data/
+/.data.draftscope-update-*/
+/.data.draftscope-transaction-*.json
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/
+*.log

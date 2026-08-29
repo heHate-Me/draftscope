@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use DraftScope in research or analysis, please cite the software."
+title: "DraftScope"
+type: software
+version: 0.1.0
+date-released: 2026-08-28
+authors:
+  - family-names: "Cecala"
+    given-names: "Drew"
+repository-code: "https://github.com/heHate-Me/draftscope"
+url: "https://github.com/heHate-Me/draftscope"
+license: MIT
+abstract: >-
+  DraftScope is a Python command-line research tool for auditable NCAA-to-NFL
+  prospect benchmarking, draft-likelihood modeling, player comparisons, and
+  evidence-weighted NFL team-fit analysis.
+keywords:
+  - NCAA football
+  - NFL Draft
+  - sports analytics
+  - scouting
+  - predictive modeling

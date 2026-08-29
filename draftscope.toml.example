@@ -1,0 +1,47 @@
+[draftscope]
+season = 2026
+# Keep players_file beneath output_dir so weekly checkpoints publish atomically.
+players_file = "data/players_2026.csv"
+team_profiles_file = "data/team_profiles_2026.csv"
+output_dir = "data"
+cache_dir = ".draftscope-cache"
+college_data_provider = "sportsdataverse"
+cfbd_fallback = false
+lookback_years = 10
+bootstrap = 0
+discover_candidates = true
+discovery_per_position = 50
+preseason_prior_year = true
+build_weekly_history = true
+strict_model_data = true
+historical_raw_cache_dir = ".draftscope-cache/historical_college"
+auto_team_needs = true
+
+# SportsDataverse publishes downloadable roster, schedule, team, and player-box
+# files with no API key or metered monthly quota. CFBD remains available as an
+# explicit fallback for gaps, but enabling it requires a CollegeFootballData key.
+
+# National discovery uses SportsDataverse's current FBS roster plus player-box
+# production through the latest fully completed week. Before Week 1, prior-
+# season production is joined to the current roster by ESPN athlete ID as a
+# clearly labeled preseason prior.
+
+# With build_weekly_history=true, update builds/reuses ten checkpoint-aligned
+# full FBS roster seasons and targets the immediately following NFL draft:
+# P(drafted next draft | FBS roster player at the checkpoint). Players with no
+# stats and returning/non-entering players remain in the denominator. Keep
+# strict_model_data=true so linkage, cutoff, and leakage audit failures stop the
+# college model instead of publishing a mislabeled probability.
+
+# Optional override: this must be a complete drafted + undrafted roster risk set
+# with matching checkpoints, model_stage, and one probability_kind contract on
+# every row. It is not a prospects-only, entrants-only, or leavers-only file.
+# historical_file = "data/historical_prospects.csv"
+
+# The nflverse ten-draft Combine cohort is always loaded separately for
+# current-active drafted measurement benchmarks and P(drafted | Combine
+# participant). It is never blended with the college next-draft probability.
+
+# Optional reproducible override. By default, the newest completed draft is found
+# automatically from the downloaded source files.
+# benchmark_end_year = 2026
