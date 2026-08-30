@@ -2,7 +2,7 @@
 
 DraftScope is a standalone Python command-line scouting tool for NCAA players entering the 2026 season (normally prospects for the 2027 NFL Draft). It benchmarks a player against the latest ten completed NFL draft classes, estimates draft likelihood, finds drafted-player comps, ranks a prospect board, and scores possible NFL team fits.
 
-It uses only the Python standard library. Every score exposes its comparison population, feature coverage, and validation metrics.
+The DraftScope CLI and modeling pipeline use only the Python standard library. Every score exposes its comparison population, feature coverage, and validation metrics.
 
 [Model card](MODEL_CARD.md) · [Synthetic sample report](examples/sample_scouting_report.md) ·
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
@@ -17,6 +17,14 @@ It uses only the Python standard library. Every score exposes its comparison pop
 - Finds up to eight same-position comps among current-active drafted players, the separately scoped all-era career-elite catalog, and the full drafted subset of the configured recent history supporting the pick range.
 - Ranks NFL fits from broad need, dated starter/contract evidence, scheme/prototype compatibility, roster timeline, coaching stability, and likely draft access.
 - When the required current-season releases are available and `update` is run, discovers a national FBS production pool, refreshes explicitly tracked players, snapshots the raw evidence, rebuilds the board, and reports rank/profile/probability movement through the latest completed week.
+
+## Held-out validation evidence
+
+[![DraftScope held-out validation chart comparing within-position average precision with actual NFL draft rate for 2019–2026](docs/figures/draftscope_position_validation.png)](docs/figures/draftscope_position_validation.png)
+
+This chart summarizes expanding-window tests across the 2019–2026 NFL Drafts. Every held-out class was scored using only earlier seasons. Within each position, the gray diamond is the actual draft rate and the blue circle is average precision, a ranking metric—not an individual player's draft probability. A larger gap means drafted players were more concentrated near the top of DraftScope's same-position rankings than in a no-skill ranking. The `× no-skill` value is average precision divided by draft rate; it is not a general accuracy multiplier. This figure shows ranking separation, not probability calibration.
+
+Ten displayed validation rows covering eleven roles passed the documented publication gates; OT and IOL share one pooled college-model result. K, P, and LS probabilities remain withheld. See the [model card](MODEL_CARD.md#position-level-results) for the full protocol, numerical results, calibration metrics, limitations, and withholding rules. The optional figure generator, [`tools/build_position_validation_chart.py`](tools/build_position_validation_chart.py), reads that canonical table directly and requires Pillow; Pillow is not part of DraftScope's runtime.
 
 ## Accuracy boundary
 
