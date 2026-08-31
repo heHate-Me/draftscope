@@ -103,6 +103,14 @@ using only earlier classes. Earlier out-of-sample predictions may calibrate a
 later class. The audit verified the no-future-training rule across 112
 position-year folds and eight held-out draft years.
 
+The [Ashton Jeanty retrospective](examples/retrospective_2025_ashton_jeanty.md)
+shows the same temporal contract at one season-complete 2024 checkpoint: the
+current method is trained and calibrated on earlier classes, the scorer can
+access only allow-listed checkpoint fields, and evaluation occurs only after
+the complete 2025 RB score ledger is fixed. It is an illustrative replay
+selected after the fact, not a forecast archived in 2025 or an independent
+substitute for the aggregate evaluation below.
+
 The existing publication gate requires at least 50 evaluated rows, lower Brier
 score than the past-only position-prevalence baseline, ROC-AUC of at least 0.55,
 and average precision at least two percentage points above prevalence. The

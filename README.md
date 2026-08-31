@@ -4,7 +4,7 @@ DraftScope is a standalone Python command-line scouting tool for NCAA players en
 
 The DraftScope CLI and modeling pipeline use only the Python standard library. Every score exposes its comparison population, feature coverage, and validation metrics.
 
-[Model card](MODEL_CARD.md) · [Synthetic sample report](examples/sample_scouting_report.md) ·
+[Model card](MODEL_CARD.md) · [Retrospective 2025 case](examples/retrospective_2025_ashton_jeanty.md) · [Synthetic sample report](examples/sample_scouting_report.md) ·
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Changelog](CHANGELOG.md)
 
 ## What it does
@@ -25,6 +25,18 @@ The DraftScope CLI and modeling pipeline use only the Python standard library. E
 This chart summarizes expanding-window tests across the 2019–2026 NFL Drafts. Every held-out class was scored using only earlier seasons. Within each position, the gray diamond is the actual draft rate and the blue circle is average precision, a ranking metric—not an individual player's draft probability. A larger gap means drafted players were more concentrated near the top of DraftScope's same-position rankings than in a no-skill ranking. The `× no-skill` value is average precision divided by draft rate; it is not a general accuracy multiplier. This figure shows ranking separation, not probability calibration.
 
 Ten displayed validation rows covering eleven roles passed the documented publication gates; OT and IOL share one pooled college-model result. K, P, and LS probabilities remain withheld. See the [model card](MODEL_CARD.md#position-level-results) for the full protocol, numerical results, calibration metrics, limitations, and withholding rules. The optional figure generator, [`tools/build_position_validation_chart.py`](tools/build_position_validation_chart.py), reads that canonical table directly and requires Pillow; Pillow is not part of DraftScope's runtime.
+
+## Retrospective 2025 replay
+
+The [Ashton Jeanty case study](examples/retrospective_2025_ashton_jeanty.md)
+reconstructs a season-complete 2024 checkpoint and holds out the entire 2025
+draft class. Using only 2017–2024 draft outcomes, the current DraftScope method
+assigned Jeanty a 45.3% full-roster probability and ranked him first among
+1,152 source-defined RB rows. He was later selected sixth overall.
+
+This is a replay created after the draft—not a forecast saved in 2025. It
+publishes the full holdout metrics, an out-of-distribution warning, an honest
+draft-slot miss, source and artifact hashes, and the exact reproduction command.
 
 ## Accuracy boundary
 

@@ -7,6 +7,17 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ## [Unreleased]
 
+### Added
+
+- An outcome-blind retrospective holdout scorer, reproducible public replay
+  tool, and Ashton Jeanty 2025 case study with a forecast-first hash, full-class
+  evaluation, source hashes, and explicit post-outcome reconstruction limits.
+
+### Changed
+
+- Historical roster aliases can be resolved before draft outcomes are joined
+  for designated retrospective holdout years.
+
 ## [0.1.0] - 2026-08-28
 
 ### Added

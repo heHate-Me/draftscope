@@ -8,7 +8,8 @@ include MODEL_CARD.md
 include SECURITY.md
 include draftscope.toml.example
 include run_draftscope.py
-recursive-include examples *.csv *.md
+recursive-include examples *.csv *.json *.md
 recursive-include notebooks *.ipynb
 recursive-include tests *.py
 include tools/check_publication_safety.py
+include tools/replay_retrospective_case.py

@@ -20,6 +20,13 @@ comparison results, and team-context evidence were generated from the public
 sources attributed below. The MIT license covers the project's original report
 format and prose; it does not relicense those source facts or provider content.
 
+The tracked Ashton Jeanty retrospective Markdown and compact JSON contain one
+player's attributed public facts, transformed model inputs and outputs, and
+aggregate holdout metrics. They do not contain SportsDataverse or nflverse
+source rows, a player-board export, or a training-data extract. The MIT license
+covers DraftScope's original replay code, report structure, and prose; it does
+not claim ownership of the underlying facts, names, marks, or provider content.
+
 Do not force-add downloaded or generated runtime data to a source release.
 Anyone publishing a data export, model bundle, report collection, or other
 derived artifact is responsible for reviewing the exact upstream assets used,

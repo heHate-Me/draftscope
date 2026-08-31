@@ -68,6 +68,28 @@ COLLEGE_PUBLIC_SPECIALIST_FEATURES: dict[str, tuple[str, ...]] = {
     ),
     "LS": (),
 }
+_RETROSPECTIVE_AUXILIARY_FIELDS = (
+    "position",
+    "college_source_position",
+    "school",
+    "conference",
+    "season",
+    "draft_year",
+    "checkpoint",
+    "as_of_week",
+    "feature_cutoff_season",
+    "model_stage",
+    "probability_kind",
+    "population",
+    "class_year",
+)
+_RETROSPECTIVE_CONTRACT_FIELDS = (
+    "checkpoint",
+    "as_of_week",
+    "model_stage",
+    "probability_kind",
+    "population",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +166,28 @@ def college_candidate_features(position: str) -> tuple[str, ...]:
         + COLLEGE_CONTEXT_FEATURES
         + production
     )
+
+
+def _retrospective_feature_row(
+    row: Mapping[str, Any],
+    allowed_features: Sequence[str],
+) -> dict[str, Any]:
+    """Read only allow-listed inputs and checkpoint-audit fields."""
+
+    permitted = dict.fromkeys((*allowed_features, *_RETROSPECTIVE_AUXILIARY_FIELDS))
+    return {
+        key: row.get(key)
+        for key in permitted
+        if row.get(key) not in (None, "")
+    }
+
+
+def _contract_value(value: Any) -> Any:
+    try:
+        number = parse_number(value)
+    except DataError:
+        number = None
+    return number if number is not None else str(value).strip()
 
 
 class ModelError(ValueError):
@@ -319,6 +363,35 @@ class DraftPrediction:
     out_of_distribution_score: float | None = None
     validation: ModelValidation | None = None
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class RetrospectiveScore:
+    """One outcome-blind score from a strictly later holdout class."""
+
+    input_index: int
+    raw_probability: float
+    probability: float
+    within_position_rank: int
+    feature_coverage: float
+    out_of_distribution_score: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class RetrospectiveHoldout:
+    """Past-only model state and scores for one later draft class."""
+
+    position: str
+    holdout_year: int
+    training_years: tuple[int, ...]
+    training_rows: int
+    training_positives: int
+    training_prevalence: float
+    calibration_years: tuple[int, ...]
+    calibration_rows: int
+    calibration_positives: int
+    features: tuple[str, ...]
+    scores: tuple[RetrospectiveScore, ...]
 
 
 class DraftProbabilityModel:
@@ -1018,6 +1091,199 @@ class DraftProbabilityModel:
             return probability
         return self.calibrator.predict_probability({"raw_logit": logit(probability)})
 
+    def score_retrospective_holdout(
+        self,
+        holdout_rows: Sequence[Mapping[str, Any]],
+        *,
+        holdout_year: int,
+    ) -> RetrospectiveHoldout:
+        """Score a later class without reading any of its outcome fields.
+
+        The model instance must have been built entirely from earlier draft
+        classes. Calibration is reconstructed from every earlier prequential
+        raw prediction, including warmup folds, matching the state available
+        immediately before ``holdout_year`` in expanding-window validation.
+        """
+
+        year = int(holdout_year)
+        year_by_index = self._validation_groups()
+        training_years = tuple(sorted(set(year_by_index.values())))
+        if not training_years:
+            raise ModelError("Retrospective scoring requires dated training rows")
+        if max(training_years) >= year:
+            raise ModelError(
+                "Retrospective training rows must all precede the holdout draft year"
+            )
+
+        training_contract: dict[str, Any] = {}
+        for field_name in _RETROSPECTIVE_CONTRACT_FIELDS:
+            values = {
+                _contract_value(row.get(field_name))
+                for row in self.rows
+                if row.get(field_name) not in (None, "")
+            }
+            if len(values) > 1:
+                raise ModelError(
+                    f"Retrospective training rows mix {field_name} contracts"
+                )
+            if values:
+                training_contract[field_name] = next(iter(values))
+
+        prepared_holdout: list[dict[str, Any]] = []
+        source_indices: list[int] = []
+        for source_index, source_row in enumerate(holdout_rows):
+            feature_row = _retrospective_feature_row(
+                source_row,
+                self.contract.allowed_features,
+            )
+            row = self._prepare_retrospective_holdout_row(feature_row)
+            row_year = parse_number(row.get("draft_year") or row.get("season"))
+            if row_year is None or int(row_year) != year:
+                raise ModelError(
+                    "Every retrospective holdout row must match the requested draft year"
+                )
+            if row.get("position") != self.position:
+                continue
+            for field_name, expected in training_contract.items():
+                value = row.get(field_name)
+                if value in (None, "") or _contract_value(value) != expected:
+                    raise ModelError(
+                        "Retrospective holdout rows must match the training "
+                        f"{field_name} contract"
+                    )
+            season = parse_number(row.get("season"))
+            feature_cutoff = parse_number(row.get("feature_cutoff_season"))
+            checkpoint_week = parse_number(row.get("as_of_week"))
+            if season is not None and int(season) + 1 != year:
+                raise ModelError(
+                    "Retrospective holdout season must immediately precede its draft year"
+                )
+            if season is not None and feature_cutoff is not None:
+                expected_cutoff = int(season) - 1 if checkpoint_week == 0 else int(season)
+                if int(feature_cutoff) != expected_cutoff:
+                    raise ModelError(
+                        "Retrospective holdout feature cutoff does not match its checkpoint"
+                    )
+            source_indices.append(source_index)
+            prepared_holdout.append(
+                self._prepare_external_row(
+                    row,
+                    self._row_transformer,
+                )
+            )
+        if not prepared_holdout:
+            raise ModelError(
+                f"No {self.position} rows were available for the {year} holdout"
+            )
+
+        calibration_labels: list[int] = []
+        calibration_raw: list[float] = []
+        calibration_years: list[int] = []
+        all_indices = sorted(year_by_index)
+        for calibration_year in training_years[1:]:
+            train_indices = [
+                index
+                for index in all_indices
+                if year_by_index[index] < calibration_year
+            ]
+            test_indices = [
+                index
+                for index in all_indices
+                if year_by_index[index] == calibration_year
+            ]
+            train_labels = [self.labels[index] for index in train_indices]
+            if not test_indices or len(set(train_labels)) < 2:
+                continue
+            raw_train_rows = [self.rows[index] for index in train_indices]
+            train_rows, transformer = self._prepare_training_rows(
+                raw_train_rows,
+                train_labels,
+            )
+            fold_features = self._select_features(train_rows, train_labels)
+            if len(fold_features) < 2:
+                continue
+            try:
+                fold_model = self._fit_probability_model(
+                    train_rows,
+                    train_labels,
+                    fold_features,
+                    max_iter=1600,
+                )
+            except ModelError:
+                continue
+            for index in test_indices:
+                test_row = self._prepare_external_row(self.rows[index], transformer)
+                calibration_raw.append(fold_model.predict_probability(test_row))
+                calibration_labels.append(self.labels[index])
+            calibration_years.append(calibration_year)
+
+        calibrator = self._fit_calibrator(
+            calibration_raw,
+            calibration_labels,
+            max_iter=1400,
+        )
+        raw_probabilities = [
+            self.raw_model.predict_probability(row) for row in prepared_holdout
+        ]
+        probabilities = [
+            (
+                calibrator.predict_probability(
+                    {"raw_logit": logit(raw_probability)}
+                )
+                if calibrator
+                else raw_probability
+            )
+            for raw_probability in raw_probabilities
+        ]
+        ranks = [
+            1 + sum(other > probability for other in probabilities)
+            for probability in probabilities
+        ]
+        coverages = [
+            sum(parse_number(row.get(feature)) is not None for feature in self.features)
+            / len(self.features)
+            for row in prepared_holdout
+        ]
+        ood_scores = [self._ood_score(row) for row in prepared_holdout]
+        scores = tuple(
+            RetrospectiveScore(
+                input_index=source_indices[index],
+                raw_probability=raw_probability,
+                probability=probability,
+                within_position_rank=rank,
+                feature_coverage=coverage,
+                out_of_distribution_score=ood_score,
+            )
+            for index, (raw_probability, probability, rank, coverage, ood_score) in enumerate(
+                zip(
+                    raw_probabilities,
+                    probabilities,
+                    ranks,
+                    coverages,
+                    ood_scores,
+                )
+            )
+        )
+        return RetrospectiveHoldout(
+            position=self.position,
+            holdout_year=year,
+            training_years=training_years,
+            training_rows=len(self.rows),
+            training_positives=sum(self.labels),
+            training_prevalence=sum(self.labels) / len(self.labels),
+            calibration_years=tuple(calibration_years),
+            calibration_rows=len(calibration_labels),
+            calibration_positives=sum(calibration_labels),
+            features=self.features,
+            scores=scores,
+        )
+
+    def _prepare_retrospective_holdout_row(
+        self,
+        row: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return dict(row)
+
     def _ood_score(self, prepared_candidate: Mapping[str, Any]) -> float | None:
         distances: list[float] = []
         # Smoothed target encodings and binary availability flags are bounded
@@ -1139,6 +1405,23 @@ class DraftProbabilityModel:
         )
 
 
+def _normalize_college_position_row(
+    source_row: Mapping[str, Any],
+    *,
+    position: str,
+    source_position_pool: Sequence[str],
+) -> dict[str, Any]:
+    row = dict(source_row)
+    if row.get("position") in source_position_pool:
+        row["college_source_position"] = row.get("position")
+        row["position"] = position
+    if "has_recorded_stats" in row:
+        row["has_recorded_stats"] = _college_availability_value(
+            row.get("has_recorded_stats")
+        )
+    return row
+
+
 class CollegeDraftProbabilityModel(DraftProbabilityModel):
     """Pre-combine model for P(drafted next draft | FBS roster checkpoint)."""
 
@@ -1150,17 +1433,14 @@ class CollegeDraftProbabilityModel(DraftProbabilityModel):
         population: str,
     ):
         self.source_position_pool = COLLEGE_POSITION_POOLS.get(position, (position,))
-        normalized_rows: list[dict[str, Any]] = []
-        for source_row in rows:
-            row = dict(source_row)
-            if row.get("position") in self.source_position_pool:
-                row["college_source_position"] = row.get("position")
-                row["position"] = position
-            if "has_recorded_stats" in row:
-                row["has_recorded_stats"] = _college_availability_value(
-                    row.get("has_recorded_stats")
-                )
-            normalized_rows.append(row)
+        normalized_rows = [
+            _normalize_college_position_row(
+                source_row,
+                position=position,
+                source_position_pool=self.source_position_pool,
+            )
+            for source_row in rows
+        ]
         labeled = [
             row
             for row in normalized_rows
@@ -1295,6 +1575,16 @@ class CollegeDraftProbabilityModel(DraftProbabilityModel):
         transformer: _CollegeContextEncoder,
     ) -> dict[str, Any]:
         return _prepare_college_row(row, transformer)
+
+    def _prepare_retrospective_holdout_row(
+        self,
+        row: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return _normalize_college_position_row(
+            row,
+            position=self.position,
+            source_position_pool=self.source_position_pool,
+        )
 
     def _fit_probability_model(
         self,
