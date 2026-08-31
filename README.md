@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/readme-hero.png" alt="DraftScope football scouting and analytics hero" width="100%">
+</p>
+
 # DraftScope
 
 DraftScope is a standalone Python command-line scouting tool for NCAA players entering the 2026 season (normally prospects for the 2027 NFL Draft). It benchmarks a player against the latest ten completed NFL draft classes, estimates draft likelihood, finds drafted-player comps, ranks a prospect board, and scores possible NFL team fits.
