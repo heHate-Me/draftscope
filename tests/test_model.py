@@ -10,6 +10,7 @@ from draftscope.model import (
     DECISION_THRESHOLD,
     CollegeDraftProbabilityModel,
     DraftProbabilityModel,
+    ModelError,
     college_candidate_features,
 )
 from draftscope.records import load_records, write_records
@@ -322,6 +323,95 @@ class ModelTests(unittest.TestCase):
         baseline_ood = model._ood_score(prepared)
         prepared["context_school_draft_rate"] = 1.0
         self.assertAlmostEqual(model._ood_score(prepared) or 0.0, baseline_ood or 0.0)
+
+    def test_retrospective_holdout_is_past_only_and_outcome_blind(self) -> None:
+        class OutcomeGuard(dict[str, object]):
+            forbidden = {
+                "drafted",
+                "draft_round",
+                "draft_ovr",
+                "elite",
+                "nfl_team",
+                "reference_only",
+                "nfl_hof",
+                "nfl_all_pro_selections",
+                "nfl_pro_bowls",
+                "active_roster_status",
+            }
+
+            def get(self, key, default=None):
+                if key in self.forbidden or str(key).startswith("outcome_"):
+                    raise AssertionError(f"Retrospective scorer read prohibited field {key}")
+                return super().get(key, default)
+
+        rows = synthetic_college_roster_history()
+        prior_rows = [row for row in rows if int(row["draft_year"]) < 2026]
+        holdout_rows = [row for row in rows if int(row["draft_year"]) == 2026]
+        model = CollegeDraftProbabilityModel(
+            prior_rows,
+            position="WR",
+            population="FBS roster through completed week",
+        )
+
+        paired_rows: list[dict[str, object]] = []
+        for row in holdout_rows:
+            original = dict(row)
+            changed = {
+                **row,
+                "drafted": not bool(row["drafted"]),
+                "draft_round": 1 if not bool(row["drafted"]) else None,
+                "draft_ovr": 1 if not bool(row["drafted"]) else None,
+                "elite": not bool(row["drafted"]),
+                "outcome_label_known": False,
+                "outcome_match_method": "deliberately changed in test",
+                "nfl_team": "POST-DRAFT TEAM",
+                "reference_only": True,
+                "nfl_hof": True,
+                "nfl_all_pro_selections": 99,
+                "nfl_pro_bowls": 99,
+                "active_roster_status": "ACT",
+            }
+            paired_rows.extend((OutcomeGuard(original), OutcomeGuard(changed)))
+
+        replay = model.score_retrospective_holdout(
+            paired_rows,
+            holdout_year=2026,
+        )
+        self.assertEqual(replay.training_years, (2022, 2023, 2024, 2025))
+        self.assertEqual(replay.training_rows, 640)
+        self.assertEqual(replay.training_positives, 48)
+        self.assertEqual(replay.calibration_years, (2023, 2024, 2025))
+        self.assertEqual(replay.calibration_rows, 480)
+        self.assertEqual(replay.calibration_positives, 36)
+        self.assertTrue(replay.scores)
+        for index in range(0, len(replay.scores), 2):
+            original = replay.scores[index]
+            changed = replay.scores[index + 1]
+            self.assertEqual(original.raw_probability, changed.raw_probability)
+            self.assertEqual(original.probability, changed.probability)
+            self.assertEqual(original.within_position_rank, changed.within_position_rank)
+        self.assertFalse(
+            {"drafted", "draft_round", "draft_ovr", "elite"} & set(replay.features)
+        )
+
+        wrong_checkpoint = dict(holdout_rows[0])
+        wrong_checkpoint["as_of_week"] = 7
+        with self.assertRaisesRegex(ModelError, "as_of_week contract"):
+            model.score_retrospective_holdout(
+                [wrong_checkpoint],
+                holdout_year=2026,
+            )
+
+        full_model = CollegeDraftProbabilityModel(
+            rows,
+            position="WR",
+            population="FBS roster through completed week",
+        )
+        with self.assertRaisesRegex(ModelError, "must all precede"):
+            full_model.score_retrospective_holdout(
+                holdout_rows,
+                holdout_year=2026,
+            )
 
     def test_year_held_out_model_orders_strong_above_weak(self) -> None:
         rows = synthetic_history()

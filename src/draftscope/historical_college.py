@@ -248,6 +248,7 @@ def build_historical_college_training_data(
     nflverse_draft_rows: Iterable[Mapping[str, Any]] | None = None,
     nflverse_draft_path: str | os.PathLike[str] | None = None,
     as_of_week: int = 0,
+    outcome_blind_alias_draft_years: Iterable[int] = (),
     refresh: bool = False,
     strict: bool = True,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -269,9 +270,25 @@ def build_historical_college_training_data(
     through the requested completed week. A 2026 preseason prospect can therefore
     never be trained against historical rows containing that roster season's
     future complete production.
+
+    For a designated retrospective holdout draft year, roster aliases can be
+    collapsed from checkpoint identity and statistics before draft outcomes are
+    joined. Strict mode then rejects any alias that only the outcome crosswalk
+    could resolve.
     """
 
     seasons = _validate_seasons(college_seasons)
+    outcome_blind_years = {
+        int(year) for year in outcome_blind_alias_draft_years
+    }
+    unsupported_blind_years = outcome_blind_years - {
+        season + 1 for season in seasons
+    }
+    if unsupported_blind_years:
+        raise DataError(
+            "Outcome-blind alias years fall outside the requested draft window: "
+            f"{sorted(unsupported_blind_years)}"
+        )
     if as_of_week < 0:
         raise DataError("as_of_week must be zero or greater")
     checkpoint = _checkpoint_label(as_of_week)
@@ -431,6 +448,16 @@ def build_historical_college_training_data(
             draft_year=draft_year,
             source_namespace=source_namespace,
         )
+        outcome_blind_alias_audit: dict[str, Any] = {}
+        if draft_year in outcome_blind_years:
+            canonical_roster, outcome_blind_alias_audit = (
+                _collapse_negative_roster_aliases(
+                    canonical_roster,
+                    outcomes={},
+                    stat_profiles=stat_profiles,
+                    team_aliases=team_aliases,
+                )
+            )
         outcomes, outcome_audit = _match_draft_outcomes(
             canonical_roster,
             draft_links,
@@ -446,19 +473,33 @@ def build_historical_college_training_data(
                 else _REVIEWED_ROSTER_SOURCE_OMISSIONS
             ),
         )
-        canonical_roster, alias_collapse_audit = _collapse_resolved_roster_aliases(
-            canonical_roster,
-            outcome_audit.get("resolved_cross_id_roster_aliases", []),
-            outcomes=outcomes,
-        )
-        outcome_audit.update(alias_collapse_audit)
-        canonical_roster, negative_alias_audit = _collapse_negative_roster_aliases(
-            canonical_roster,
-            outcomes=outcomes,
-            stat_profiles=stat_profiles,
-            team_aliases=team_aliases,
-        )
-        outcome_audit.update(negative_alias_audit)
+        if draft_year in outcome_blind_years:
+            unresolved = outcome_audit.get("resolved_cross_id_roster_aliases", [])
+            outcome_audit.update(outcome_blind_alias_audit)
+            outcome_audit.update(
+                {
+                    "outcome_blind_alias_resolution": True,
+                    "outcome_blind_unresolved_cross_id_aliases": unresolved,
+                    "cross_id_duplicate_alias_rows_dropped": 0,
+                    "cross_id_duplicate_alias_player_ids_dropped": [],
+                    "cross_id_duplicate_alias_fields_merged": 0,
+                    "cross_id_duplicate_alias_outcome_conflicts": [],
+                }
+            )
+        else:
+            canonical_roster, alias_collapse_audit = _collapse_resolved_roster_aliases(
+                canonical_roster,
+                outcome_audit.get("resolved_cross_id_roster_aliases", []),
+                outcomes=outcomes,
+            )
+            outcome_audit.update(alias_collapse_audit)
+            canonical_roster, negative_alias_audit = _collapse_negative_roster_aliases(
+                canonical_roster,
+                outcomes=outcomes,
+                stat_profiles=stat_profiles,
+                team_aliases=team_aliases,
+            )
+            outcome_audit.update(negative_alias_audit)
 
         season_rows, availability_audit = _build_season_rows(
             canonical_roster,
@@ -521,6 +562,10 @@ def build_historical_college_training_data(
             source_failures.append(
                 f"{draft_year}: a resolved roster alias was also linked to a separate draft outcome"
             )
+        if outcome_audit.get("outcome_blind_unresolved_cross_id_aliases"):
+            source_failures.append(
+                f"{draft_year}: outcome-blind roster deduplication left a draft-resolved alias"
+            )
 
     contract_audit = audit_historical_college_training_data(
         all_rows,
@@ -552,6 +597,7 @@ def build_historical_college_training_data(
         "probability_condition": PROBABILITY_CONDITION,
         "college_seasons": list(seasons),
         "draft_years": [season + 1 for season in seasons],
+        "outcome_blind_alias_draft_years": sorted(outcome_blind_years),
         "rows": len(all_rows),
         "drafted_rows": drafted_rows,
         "base_rate": drafted_rows / len(all_rows) if all_rows else None,
@@ -595,6 +641,9 @@ def build_historical_college_training_data(
                 else f"current roster plus current-season statistics bounded through Week {as_of_week}"
             ),
             "outcomes_from_immediate_next_draft_only": True,
+            "outcome_blind_alias_resolution_draft_years": sorted(
+                outcome_blind_years
+            ),
             "draft_measurements_or_pre_draft_grades_copied": False,
             "nflverse_positive_only_age_used_as_feature": False,
             "outcome_fields_in_model_feature_allow_list": bool(
@@ -788,20 +837,28 @@ def _load_nflverse_rows(
             "cache_hit": None,
             "sha256": _json_sha256(rows),
         }
-    existing_default = Path(".draftscope-cache/draft_picks.csv")
     if draft_path is not None:
         path = draft_path
         if not path.exists() or path.stat().st_size == 0:
             raise DataError(f"nflverse draft file does not exist or is empty: {path}")
         cache_hit: bool | None = True
-    elif not refresh and existing_default.exists() and existing_default.stat().st_size > 0:
-        path = existing_default
-        cache_hit = True
     elif cache_root is not None:
         destination = cache_root / "nflverse_draft_picks.csv"
         cache_hit = destination.exists() and destination.stat().st_size > 0 and not refresh
         path = _download(NFLVERSE_DRAFT_URL, destination, refresh=refresh)
     else:
+        existing_default = Path(".draftscope-cache/draft_picks.csv")
+        if (
+            not refresh
+            and existing_default.exists()
+            and existing_default.stat().st_size > 0
+        ):
+            path = existing_default
+            cache_hit = True
+        else:
+            path = None
+            cache_hit = False
+    if path is None:
         request = Request(
             NFLVERSE_DRAFT_URL,
             headers={"User-Agent": "DraftScope/0.1 (+local research tool)"},

@@ -1,0 +1,188 @@
+{
+  "artifact_kind": "retrospective_replay",
+  "authenticity": "Reconstructed after the outcome with the current pipeline; not a forecast saved before the draft. Holdout labels are joined during reconstruction, but the scorer receives only allow-listed checkpoint fields; evaluation reads those joined labels only after the complete score ledger is generated and hashed.",
+  "build_audit": {
+    "canonical_rows_sha256": "033da11b97f86ce10d91ee5d52f1c6d49e936e6a431d0880f18d2ea430798ade",
+    "drafted_rows": 2153,
+    "outcome_blind_alias_draft_years": [
+      2025
+    ],
+    "positive_match_coverage": 1.0,
+    "quality_gate_status": "pass",
+    "row_hash_representation": "sorted-key JSON of each loaded in-memory row, in source order",
+    "rows": 138663,
+    "source_artifacts": 37,
+    "source_manifest_sha256": "e78cbdd9e6720cefac87be50f834bebb08fcc82aaae18df52bd8e7addae48349"
+  },
+  "checkpoint": {
+    "college_season": 2024,
+    "draft_year": 2025,
+    "population": "FBS roster through completed Week 16",
+    "stored_as_of_week": 16
+  },
+  "forecast_artifact": {
+    "outcomes_in_payload": false,
+    "rows": 1152,
+    "sha256": "383707291ff930fefd340a8091be652e76e89fa04f62d008892870dbf83bae80"
+  },
+  "holdout_class_evaluation": {
+    "average_precision": 0.7414457554646916,
+    "baseline_brier": 0.02124807429611461,
+    "brier": 0.017428235233705514,
+    "log_loss": 0.06393208372682924,
+    "observed_prevalence": 0.021701388888888888,
+    "positives": 25,
+    "roc_auc": 0.9866903283052352,
+    "rows": 1152,
+    "top_10_drafted": 9
+  },
+  "model_before_holdout": {
+    "calibration_draft_years": [
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "calibration_positives": 134,
+    "calibration_rows": 7985,
+    "prior_only_quality_gate_passed": true,
+    "prior_only_validation": {
+      "average_precision": 0.3717156106599851,
+      "baseline_brier": 0.016710583649341776,
+      "brier": 0.01484378784684909,
+      "evaluated_years": [
+        2019,
+        2020,
+        2021,
+        2022,
+        2023,
+        2024
+      ],
+      "positives": 115,
+      "prevalence": 0.01699674844812297,
+      "roc_auc": 0.9659691579559792,
+      "rows": 6766
+    },
+    "retained_features": [
+      "height_in",
+      "weight_lb",
+      "bmi",
+      "age_at_draft",
+      "class_year_numeric",
+      "has_recorded_stats",
+      "context_conference_draft_rate",
+      "context_school_draft_rate",
+      "prod_carries",
+      "prod_rush_yards",
+      "prod_scrimmage_yards",
+      "prod_touchdowns",
+      "prod_yards_per_carry",
+      "prod_yards_per_touch"
+    ],
+    "training_draft_years": [
+      2017,
+      2018,
+      2019,
+      2020,
+      2021,
+      2022,
+      2023,
+      2024
+    ],
+    "training_positives": 161,
+    "training_prevalence": 0.017501902380693553,
+    "training_rows": 9199
+  },
+  "outcome_reveal": {
+    "draft_pick": 6,
+    "draft_round": 1,
+    "drafted": true
+  },
+  "prospect": {
+    "calibrated_probability": 0.4527895247472639,
+    "checkpoint_evidence": {
+      "age_at_draft": 21.41,
+      "class_year": 3,
+      "height_in": 68.0,
+      "prod_carries": 374.0,
+      "prod_receiving_tds": 1.0,
+      "prod_receiving_yards": 138.0,
+      "prod_receptions": 23.0,
+      "prod_rush_tds": 29.0,
+      "prod_rush_yards": 2601.0,
+      "prod_scrimmage_yards": 2739.0,
+      "prod_touchdowns": 30.0,
+      "prod_yards_per_carry": 6.82994923857868,
+      "prod_yards_per_touch": 6.848300970873787,
+      "weight_lb": 208.0
+    },
+    "conditional_pick_band": {
+      "comparison_count": 5,
+      "percentiles": [
+        20,
+        50,
+        80
+      ],
+      "values": [
+        38.2,
+        41.0,
+        76.40000000000002
+      ]
+    },
+    "drafted_profile_comparisons": [
+      {
+        "draft_pick": 55,
+        "draft_year": 2020,
+        "feature_overlap": 1.0,
+        "features_compared": 9,
+        "name": "J.K. Dobbins",
+        "similarity": 67.31304984249256
+      },
+      {
+        "draft_pick": 41,
+        "draft_year": 2020,
+        "feature_overlap": 1.0,
+        "features_compared": 9,
+        "name": "Jonathan Taylor",
+        "similarity": 65.35734285229547
+      },
+      {
+        "draft_pick": 27,
+        "draft_year": 2018,
+        "feature_overlap": 1.0,
+        "features_compared": 9,
+        "name": "Rashaad Penny",
+        "similarity": 63.89584699600576
+      },
+      {
+        "draft_pick": 162,
+        "draft_year": 2017,
+        "feature_overlap": 1.0,
+        "features_compared": 9,
+        "name": "Jeremy McNichols",
+        "similarity": 60.94798512509293
+      },
+      {
+        "draft_pick": 41,
+        "draft_year": 2017,
+        "feature_overlap": 1.0,
+        "features_compared": 9,
+        "name": "Dalvin Cook",
+        "similarity": 59.94881085261523
+      }
+    ],
+    "feature_coverage": 1.0,
+    "name": "Ashton Jeanty",
+    "out_of_distribution_score": 7.863074431072415,
+    "out_of_distribution_warning": true,
+    "position": "RB",
+    "ranking_method": "competition rank; 1 + count of strictly higher scores",
+    "raw_probability": 0.8870545726664736,
+    "school": "Boise State",
+    "within_position_rank": 1,
+    "within_position_rows": 1152
+  }
+}

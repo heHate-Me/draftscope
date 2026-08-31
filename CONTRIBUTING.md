@@ -60,9 +60,17 @@ Do not commit downloaded or generated runtime material, including `data/`,
 snapshots, report collections, state files, or logs. Do not force-add an ignored
 artifact. Small fixtures must be synthetic or have documented redistribution
 permission. A deliberately maintained documentation sample may show output from
-a synthetic prospect only when its generation date, source boundaries, and
+a synthetic prospect when its generation date, source boundaries, and
 third-party attribution are preserved as in
 [`examples/sample_scouting_report.md`](examples/sample_scouting_report.md).
+
+A compact real-player retrospective may be committed when it contains no bulk
+or source-record export, uses only documented public facts and transformed
+metrics, separates scoring from the outcome reveal, discloses that it was
+reconstructed after the event, records a strict temporal cutoff and
+reproducible hashes, and preserves every required source attribution and
+redistribution boundary. See
+[`examples/retrospective_2025_ashton_jeanty.md`](examples/retrospective_2025_ashton_jeanty.md).
 
 DraftScope's MIT license covers its original code and documentation, not
 third-party data. Review [NOTICE.md](NOTICE.md) before adding a source or

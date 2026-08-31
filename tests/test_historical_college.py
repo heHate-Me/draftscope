@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -129,6 +130,52 @@ class FullDenominatorClient:
 
 
 class HistoricalCollegePipelineTests(unittest.TestCase):
+    def test_custom_draft_cache_does_not_reuse_cwd_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            working = root / "working"
+            custom = root / "custom"
+            (working / ".draftscope-cache").mkdir(parents=True)
+            custom.mkdir()
+            (working / ".draftscope-cache" / "draft_picks.csv").write_text(
+                "season,pick\n1999,99\n",
+                encoding="utf-8",
+            )
+
+            def download(_url: str, destination: Path, *, refresh: bool) -> Path:
+                self.assertEqual(destination, custom / "nflverse_draft_picks.csv")
+                self.assertFalse(refresh)
+                destination.write_text(
+                    "season,round,pick,team,position,pfr_player_name,college\n"
+                    "2025,1,1,AAA,RB,Replay Player,Replay University\n",
+                    encoding="utf-8",
+                )
+                return destination
+
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(working)
+                with patch(
+                    "draftscope.historical_college._download",
+                    side_effect=download,
+                ) as downloader:
+                    rows, metadata = _load_nflverse_rows(
+                        None,
+                        draft_path=None,
+                        cache_root=custom,
+                        refresh=False,
+                    )
+            finally:
+                os.chdir(original_cwd)
+
+            downloader.assert_called_once()
+            self.assertEqual(rows[0]["season"], "2025")
+            self.assertEqual(
+                metadata["path"],
+                str(custom / "nflverse_draft_picks.csv"),
+            )
+            self.assertFalse(metadata["cache_hit"])
+
     def test_existing_draft_cache_rejects_oversize_file(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "draft_picks.csv"
@@ -592,6 +639,72 @@ class HistoricalCollegePipelineTests(unittest.TestCase):
             "cfbd_player_id_strong_duplicate_alias",
         )
         self.assertEqual(metadata["per_season"][0]["identity_conflicts"], [])
+
+    def test_outcome_blind_holdout_deduplicates_before_joining_labels(self) -> None:
+        class OutcomeBlindAliasClient(FullDenominatorClient):
+            def get(self, path: str, **params: object):
+                if path == "/roster":
+                    common = {
+                        "lastName": "Jackson",
+                        "team": "Alpha",
+                        "position": "DB",
+                        "height": 72,
+                        "weight": 196,
+                        "year": 4,
+                        "jersey": 15,
+                        "homeCity": "Corinth",
+                        "homeState": "TX",
+                    }
+                    return [
+                        {"id": "direct-id", "firstName": "Joshua", **common},
+                        {"id": "nickname-id", "firstName": "Josh", **common},
+                    ]
+                if path == "/stats/player/season":
+                    return [
+                        {
+                            "season": 2020,
+                            "playerId": "direct-id",
+                            "player": "Joshua Jackson",
+                            "team": "Alpha",
+                            "position": "DB",
+                            "category": "defensive",
+                            "statType": "INTERCEPTIONS",
+                            "stat": 8,
+                        }
+                    ]
+                if path == "/draft/picks":
+                    return [
+                        {
+                            "collegeAthleteId": "direct-id",
+                            "collegeTeam": "Alpha",
+                            "year": 2022,
+                            "overall": 1,
+                            "round": 1,
+                            "name": "Josh Jackson",
+                            "position": "Cornerback",
+                            "nflTeam": "NFL",
+                        }
+                    ]
+                return super().get(path, **params)
+
+        rows, metadata = build_historical_college_training_data(
+            OutcomeBlindAliasClient(),
+            college_seasons=(2021,),
+            cache_dir=None,
+            nflverse_draft_rows=[nflverse_pick(name="Josh Jackson")],
+            outcome_blind_alias_draft_years=(2022,),
+        )
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["player_id"], "direct-id")
+        self.assertTrue(rows[0]["drafted"])
+        audit = metadata["per_season"][0]
+        self.assertTrue(audit["outcome_blind_alias_resolution"])
+        self.assertEqual(audit["negative_cross_id_alias_rows_dropped"], 1)
+        self.assertEqual(audit["cross_id_duplicate_alias_rows_dropped"], 0)
+        self.assertEqual(audit["outcome_blind_unresolved_cross_id_aliases"], [])
+        self.assertEqual(metadata["outcome_blind_alias_draft_years"], [2022])
+        self.assertEqual(metadata["positive_match_coverage"], 1.0)
 
     def test_strong_negative_alias_uses_unique_checkpoint_stat_identity(self) -> None:
         class NegativeAliasClient(FullDenominatorClient):
