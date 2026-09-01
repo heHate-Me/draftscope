@@ -9,12 +9,20 @@ and this project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 
 ### Added
 
+- A documented manual scouting rubric, complete/provisional/insufficient film
+  sample protocol, portable provenance fields, machine-readable evidence
+  template, and blank 2027 report template.
+- Fail-closed film-grade audits for source, sample, game identifiers, notes,
+  grading date, and optional second-grader consensus evidence.
 - An outcome-blind retrospective holdout scorer, reproducible public replay
   tool, and Ashton Jeanty 2025 case study with a forecast-first hash, full-class
   evaluation, source hashes, and explicit post-outcome reconstruction limits.
 
 ### Changed
 
+- Manual film grades and metadata are hard-excluded from probability fitting,
+  calibration, validation, and retrospective replay hashes. Provisional grades
+  remain visible but no longer affect overall profile or team-fit calculations.
 - Historical roster aliases can be resolved before draft outcomes are joined
   for designated retrospective holdout years.
 

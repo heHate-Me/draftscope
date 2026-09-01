@@ -1,0 +1,80 @@
+{
+  "template_instructions": "Create one trait_evidence entry for every graded trait. Replace nulls and placeholder objects with observed facts; do not use zero for missing evidence.",
+  "trait_confidence_scale": [
+    "low",
+    "moderate",
+    "high"
+  ],
+  "player": {
+    "player_id": null,
+    "name": null,
+    "position": null,
+    "school": null,
+    "season": null,
+    "as_of_week": null,
+    "projected_draft_year": null
+  },
+  "film_grade_status": null,
+  "film_grader": null,
+  "film_graded_at": null,
+  "film_game_ids": null,
+  "film_games_reviewed": null,
+  "film_snaps_reviewed": null,
+  "film_opponent_mix": null,
+  "film_grade_source": null,
+  "film_notes_path": null,
+  "games_reviewed": [
+    {
+      "game_id": null,
+      "opponent": null,
+      "game_date": null,
+      "relevant_snaps_reviewed": null,
+      "complete_game_reviewed": null,
+      "film_source": null,
+      "sample_role": null,
+      "notes": null
+    }
+  ],
+  "trait_evidence": [
+    {
+      "trait_key": null,
+      "grade": null,
+      "first_grader_grade": null,
+      "second_grader_grade": null,
+      "agreement_within_five_points": null,
+      "confidence": null,
+      "positive_evidence": [
+        {
+          "game_id": null,
+          "play_reference": null,
+          "observation": null
+        }
+      ],
+      "limiting_evidence": [
+        {
+          "game_id": null,
+          "play_reference": null,
+          "observation": null
+        }
+      ],
+      "game_play_references": [
+        {
+          "game_id": null,
+          "play_reference": null,
+          "observation": null
+        }
+      ],
+      "counter_evidence": [
+        {
+          "game_id": null,
+          "play_reference": null,
+          "observation": null
+        }
+      ]
+    }
+  ],
+  "film_second_grader": null,
+  "film_second_grader_agreement": null,
+  "film_consensus_method": null,
+  "second_grader_notes": null
+}

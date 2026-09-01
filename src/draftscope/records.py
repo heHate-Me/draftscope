@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import tempfile
 import unicodedata
@@ -15,6 +16,12 @@ from typing import Any, Iterable, Mapping
 from .schema import (
     BASE_PLAYER_FIELDS,
     COMMON_PHYSICAL,
+    FILM_CONSENSUS_METHODS,
+    FILM_GRADE_STATUSES,
+    FILM_OPPONENT_MIX_VALUES,
+    FILM_PROVENANCE_FIELDS,
+    MIN_COMPLETE_FILM_GAMES,
+    MIN_COMPLETE_FILM_SNAPS,
     PLAUSIBLE_RANGES,
     POSITION_GROUPS,
     PRODUCTION,
@@ -81,12 +88,18 @@ TEAM_PROFILE_NUMERIC = {
 PHYSICAL_KEYS = {spec.key for spec in COMMON_PHYSICAL}
 TRAIT_KEYS = {f"trait_{name}" for names in TRAITS.values() for name in names}
 PRODUCTION_KEYS = {f"prod_{name}" for values in PRODUCTION.values() for name, _ in values}
+FILM_NUMERIC_KEYS = {
+    "film_games_reviewed",
+    "film_snaps_reviewed",
+    "film_second_grader_agreement",
+}
 KNOWN_NUMERIC = (
     PHYSICAL_KEYS
     | TRAIT_KEYS
     | PRODUCTION_KEYS
     | OUTCOME_NUMERIC
     | TEAM_PROFILE_NUMERIC
+    | FILM_NUMERIC_KEYS
 )
 PROBABILITY_KINDS = {
     "conditional_on_entry",
@@ -256,7 +269,11 @@ def normalize_record(record: Mapping[str, Any]) -> dict[str, Any]:
             continue
         if key == "height_in":
             out[key] = parse_height(raw_value)
-        elif key in KNOWN_NUMERIC or key.startswith("trait_") or key.startswith("prod_"):
+        elif key.startswith("trait_") or key in FILM_NUMERIC_KEYS:
+            if isinstance(raw_value, bool):
+                raise DataError(f"Boolean value is not valid for numeric field {key}")
+            out[key] = parse_number(raw_value, percent_ok=False)
+        elif key in KNOWN_NUMERIC or key.startswith("prod_"):
             out[key] = parse_number(raw_value)
         elif key in BOOLEAN_KEYS:
             out[key] = parse_bool(raw_value)
@@ -401,6 +418,386 @@ def team_template_fields() -> list[str]:
     return fields
 
 
+_FILM_GAME_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,79}")
+_REQUIRED_FILM_FIELDS = (
+    "film_grade_status",
+    "film_grader",
+    "film_graded_at",
+    "film_game_ids",
+    "film_games_reviewed",
+    "film_snaps_reviewed",
+    "film_opponent_mix",
+    "film_grade_source",
+    "film_notes_path",
+)
+
+
+def _populated(value: Any) -> bool:
+    return value is not None and not (
+        isinstance(value, str) and value.strip().lower() in MISSING_TEXT
+    )
+
+
+def parse_film_game_ids(value: Any) -> tuple[str, ...]:
+    """Parse portable game identifiers from JSON lists or CSV semicolon text."""
+
+    if not _populated(value):
+        return ()
+    if isinstance(value, (list, tuple)):
+        raw_values = list(value)
+        if any(not isinstance(item, str) for item in raw_values):
+            raise DataError("film_game_ids JSON values must be strings")
+    elif isinstance(value, str):
+        raw_values = value.split(";")
+    else:
+        raise DataError("film_game_ids must be a JSON list or semicolon-delimited text")
+    identifiers = tuple(str(item).strip() for item in raw_values)
+    if not identifiers or any(not item for item in identifiers):
+        raise DataError("film_game_ids contains an empty identifier")
+    if any(item.casefold() in MISSING_TEXT for item in identifiers):
+        raise DataError("film_game_ids contains a missing-value placeholder")
+    malformed = [item for item in identifiers if _FILM_GAME_ID.fullmatch(item) is None]
+    if malformed:
+        raise DataError(
+            "film_game_ids must use stable readable identifiers containing only "
+            "letters, numbers, periods, underscores, colons, or hyphens"
+        )
+    folded = [item.casefold() for item in identifiers]
+    if len(folded) != len(set(folded)):
+        raise DataError("film_game_ids contains a duplicate identifier")
+    return identifiers
+
+
+def parse_film_opponent_mix(value: Any) -> tuple[str, ...]:
+    if not _populated(value):
+        return ()
+    if isinstance(value, (list, tuple)):
+        raw_values = list(value)
+        if any(not isinstance(item, str) for item in raw_values):
+            raise DataError("film_opponent_mix JSON values must be strings")
+    elif isinstance(value, str):
+        raw_values = value.split(";")
+    else:
+        raise DataError("film_opponent_mix must be a JSON list or semicolon-delimited text")
+    tags = tuple(str(item).strip().lower() for item in raw_values)
+    if not tags or any(not item for item in tags):
+        raise DataError("film_opponent_mix contains an empty tag")
+    if len(tags) != len(set(tags)):
+        raise DataError("film_opponent_mix contains a duplicate tag")
+    unsupported = sorted(set(tags) - set(FILM_OPPONENT_MIX_VALUES))
+    if unsupported:
+        raise DataError(
+            "film_opponent_mix contains unsupported tags: " + ", ".join(unsupported)
+        )
+    return tags
+
+
+def _film_status(row: Mapping[str, Any]) -> str:
+    return str(row.get("film_grade_status") or "").strip().lower()
+
+
+def _portable_notes_path(value: Any) -> bool:
+    text = str(value or "").strip()
+    if (
+        not isinstance(value, str)
+        or not text
+        or "\\" in text
+        or re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", text)
+        or re.match(r"^[A-Za-z]:", text)
+    ):
+        return False
+    path = PurePosixPath(text)
+    return (
+        not path.is_absolute()
+        and text != "."
+        and ".." not in path.parts
+        and not text.startswith("~")
+        and path.as_posix() == text
+    )
+
+
+def _portable_source(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not isinstance(value, str) or not text:
+        return False
+    lowered = text.casefold()
+    if lowered.startswith(("/", "~", "file:")) or "\\" in text:
+        return False
+    if re.match(r"^[A-Za-z]:", text):
+        return False
+    if re.match(r"^https?://[^\s]+$", text, flags=re.IGNORECASE):
+        return True
+    if "://" in text or "/" in text:
+        return False
+    return True
+
+
+def _integer_field(row: Mapping[str, Any], key: str) -> tuple[int | None, str | None]:
+    if isinstance(row.get(key), bool):
+        return None, f"{key} must be a non-negative integer"
+    try:
+        value = parse_number(row.get(key), percent_ok=False)
+    except DataError:
+        return None, f"{key} must be a non-negative integer"
+    if value is None:
+        return None, None
+    if value < 0 or not value.is_integer():
+        return None, f"{key} must be a non-negative integer"
+    return int(value), None
+
+
+def _film_protocol_findings(
+    row: Mapping[str, Any],
+    *,
+    row_number: int,
+    include_provisional_note: bool = True,
+) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+
+    def add(field: str, message: str, severity: str = "high") -> None:
+        findings.append(
+            {
+                "severity": severity,
+                "row": str(row_number),
+                "field": field,
+                "message": message,
+            }
+        )
+
+    numeric_traits: list[str] = []
+    populated_traits: list[str] = []
+    position = normalize_position(row.get("position"))
+    allowed_traits = {f"trait_{name}" for name in TRAITS.get(position, ())}
+    for key, value in row.items():
+        if not key.startswith("trait_") or not _populated(value):
+            continue
+        populated_traits.append(key)
+        if key not in allowed_traits:
+            add(key, f"{key} is not a defined manual film trait for position {position or 'unknown'}")
+            continue
+        if isinstance(value, bool):
+            add(key, "Trait grades must be numeric values from 0–100, not booleans")
+            continue
+        try:
+            grade = parse_number(value, percent_ok=False)
+        except DataError:
+            add(key, "Trait grades must be numeric values from 0–100")
+            continue
+        if grade is None or not 0 <= grade <= 100:
+            add(key, "Trait grades must be 0–100")
+            continue
+        numeric_traits.append(key)
+
+    film_metadata_present = any(_populated(row.get(key)) for key in FILM_PROVENANCE_FIELDS)
+    if not populated_traits and not film_metadata_present:
+        return findings
+
+    status = _film_status(row)
+    if status and status not in FILM_GRADE_STATUSES:
+        add(
+            "film_grade_status",
+            "Film grade status must be complete, provisional, or insufficient",
+        )
+    if populated_traits:
+        for field in _REQUIRED_FILM_FIELDS:
+            if not _populated(row.get(field)):
+                add(field, "Required when any manual film trait grade is populated")
+
+    for field in ("film_grader", "film_grade_source", "film_notes_path"):
+        if _populated(row.get(field)) and not isinstance(row.get(field), str):
+            add(field, f"{field} must be text")
+
+    graded_at = str(row.get("film_graded_at") or "").strip()
+    if graded_at:
+        try:
+            parsed_date = date.fromisoformat(graded_at)
+        except ValueError:
+            parsed_date = None
+        if parsed_date is None or parsed_date.isoformat() != graded_at:
+            add("film_graded_at", "Film grading date must use ISO YYYY-MM-DD")
+
+    try:
+        game_ids = parse_film_game_ids(row.get("film_game_ids"))
+    except DataError as exc:
+        game_ids = ()
+        add("film_game_ids", str(exc))
+    try:
+        opponent_mix = parse_film_opponent_mix(row.get("film_opponent_mix"))
+    except DataError as exc:
+        opponent_mix = ()
+        add("film_opponent_mix", str(exc))
+
+    games_reviewed, games_error = _integer_field(row, "film_games_reviewed")
+    snaps_reviewed, snaps_error = _integer_field(row, "film_snaps_reviewed")
+    if games_error:
+        add("film_games_reviewed", games_error)
+    if snaps_error:
+        add("film_snaps_reviewed", snaps_error)
+    if games_reviewed is not None and game_ids and games_reviewed != len(game_ids):
+        add(
+            "film_games_reviewed",
+            "film_games_reviewed must equal the number of unique film_game_ids",
+        )
+
+    if _populated(row.get("film_grade_source")) and not _portable_source(
+        row.get("film_grade_source")
+    ):
+        add("film_grade_source", "Film source must not contain a local file path")
+    if _populated(row.get("film_notes_path")) and not _portable_notes_path(
+        row.get("film_notes_path")
+    ):
+        add("film_notes_path", "Film notes path must be a portable relative POSIX path")
+
+    if status == "complete" and populated_traits:
+        if len(game_ids) < MIN_COMPLETE_FILM_GAMES or (
+            games_reviewed is not None and games_reviewed < MIN_COMPLETE_FILM_GAMES
+        ):
+            add(
+                "film_games_reviewed",
+                f"Complete film grades require at least {MIN_COMPLETE_FILM_GAMES} complete games",
+            )
+        if snaps_reviewed is None or snaps_reviewed < MIN_COMPLETE_FILM_SNAPS:
+            add(
+                "film_snaps_reviewed",
+                f"Complete film grades require at least {MIN_COMPLETE_FILM_SNAPS} relevant snaps",
+            )
+        mix = set(opponent_mix)
+        if "recent" not in mix:
+            add("film_opponent_mix", "Complete film grades require one recent game")
+        if "strongest_available" not in mix:
+            add(
+                "film_opponent_mix",
+                "Complete film grades require the strongest available opponent",
+            )
+        if not mix.intersection(
+            {"adversity", "lower_production", "different_game_script"}
+        ):
+            add(
+                "film_opponent_mix",
+                "Complete film grades require adversity, lower production, or a different game script",
+            )
+    elif status == "provisional" and numeric_traits:
+        if len(game_ids) < 1 or games_reviewed is None or games_reviewed < 1:
+            add(
+                "film_games_reviewed",
+                "Provisional film grades require at least one reviewed game",
+            )
+        if snaps_reviewed is None or snaps_reviewed < 1:
+            add(
+                "film_snaps_reviewed",
+                "Provisional film grades require at least one relevant snap",
+            )
+        if include_provisional_note:
+            add(
+                "film_grade_status",
+                "Provisional film grades are display-only and excluded from the overall profile and team fit",
+                severity="info",
+            )
+    elif status == "insufficient" and numeric_traits:
+        add(
+            "film_grade_status",
+            "Numeric trait grades cannot be published when film evidence is insufficient",
+        )
+
+    second_grader = str(row.get("film_second_grader") or "").strip()
+    agreement_present = _populated(row.get("film_second_grader_agreement"))
+    method = str(row.get("film_consensus_method") or "").strip().lower()
+    agreement: float | None = None
+    if agreement_present:
+        try:
+            agreement = (
+                None
+                if isinstance(row.get("film_second_grader_agreement"), bool)
+                else parse_number(
+                    row.get("film_second_grader_agreement"), percent_ok=False
+                )
+            )
+        except DataError:
+            agreement = None
+        if agreement is None or not 0 <= agreement <= 1:
+            add(
+                "film_second_grader_agreement",
+                "Second-grader agreement must be a number from 0–1",
+            )
+    if method and method not in FILM_CONSENSUS_METHODS:
+        add(
+            "film_consensus_method",
+            "Consensus method must be independent_average, lead_grader, or discussion_consensus",
+        )
+    if _populated(row.get("film_second_grader")) and not isinstance(
+        row.get("film_second_grader"), str
+    ):
+        add("film_second_grader", "film_second_grader must be text")
+    if second_grader and second_grader.casefold() == str(
+        row.get("film_grader") or ""
+    ).strip().casefold():
+        add("film_second_grader", "Second grader must differ from the primary grader")
+    if second_grader:
+        if not agreement_present:
+            add(
+                "film_second_grader_agreement",
+                "Second-grader agreement is required when a second grader is named",
+            )
+        if not method:
+            add(
+                "film_consensus_method",
+                "Consensus method is required when a second grader is named",
+            )
+    elif agreement_present or method:
+        add(
+            "film_second_grader",
+            "A second grader must be named before agreement or consensus metadata is recorded",
+        )
+    return findings
+
+
+def complete_film_grades_available(row: Mapping[str, Any]) -> bool:
+    """Return whether manual traits may affect scouting/profile calculations."""
+
+    if _film_status(row) != "complete":
+        return False
+    if not any(
+        key.startswith("trait_") and _populated(value) for key, value in row.items()
+    ):
+        return False
+    return not any(
+        finding["severity"] == "high"
+        for finding in _film_protocol_findings(
+            row,
+            row_number=0,
+            include_provisional_note=False,
+        )
+    )
+
+
+def film_grades_displayable(row: Mapping[str, Any]) -> bool:
+    """Return whether manual trait values are safe to include in an output."""
+
+    if _film_status(row) not in {"complete", "provisional"}:
+        return False
+    if not any(
+        key.startswith("trait_") and _populated(value)
+        for key, value in row.items()
+    ):
+        return False
+    return not any(
+        finding["severity"] == "high"
+        for finding in _film_protocol_findings(
+            row,
+            row_number=0,
+            include_provisional_note=False,
+        )
+    )
+
+
+def film_grade_audit_findings(
+    row: Mapping[str, Any], *, row_number: int = 2
+) -> list[dict[str, str]]:
+    """Return the film-only findings used by audits and output gates."""
+
+    return _film_protocol_findings(row, row_number=row_number)
+
+
 def audit_records(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
     materialized = list(rows)
     findings: list[dict[str, str]] = []
@@ -421,11 +818,7 @@ def audit_records(rows: Iterable[Mapping[str, Any]]) -> list[dict[str, str]]:
             value = parse_number(row.get(key))
             if value is not None and not low <= value <= high:
                 findings.append({"severity": "high", "row": str(index), "field": key, "message": f"{value:g} is outside plausible range {low:g}–{high:g}"})
-        for key, value in row.items():
-            if key.startswith("trait_"):
-                parsed = parse_number(value)
-                if parsed is not None and not 0 <= parsed <= 100:
-                    findings.append({"severity": "high", "row": str(index), "field": key, "message": "Trait grades must be 0–100"})
+        findings.extend(_film_protocol_findings(row, row_number=index))
         entry_probability = parse_number(row.get("draft_entry_probability"))
         declared = parse_bool(row.get("draft_declared"))
         eligible = parse_bool(row.get("draft_eligible"))

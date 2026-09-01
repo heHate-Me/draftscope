@@ -8,7 +8,13 @@ from unittest.mock import patch
 
 from draftscope.analysis import Comparable, ProspectEvaluator
 from draftscope.mathstats import robust_scale
-from draftscope.records import normalize_name, parse_bool, parse_number, write_records
+from draftscope.records import (
+    complete_film_grades_available,
+    normalize_name,
+    parse_bool,
+    parse_number,
+    write_records,
+)
 from draftscope.reporting import render_evaluation
 from draftscope.schema import MetricSpec, all_specs, normalize_position
 from test_model import synthetic_college_roster_history, synthetic_history
@@ -47,17 +53,23 @@ def _uncached_comparables(
         and parse_bool(row.get("drafted")) is True
     ]
     minimum_history = max(5, math.ceil(len(drafted) * 0.20))
+
+    def value_for(row: dict[str, object], spec: MetricSpec) -> float | None:
+        if spec.category == "skills" and not complete_film_grades_available(row):
+            return None
+        return parse_number(row.get(spec.key))
+
     available_specs = [
         spec
         for spec in specs
         if parse_number(candidate.get(spec.key)) is not None
-        and sum(parse_number(row.get(spec.key)) is not None for row in drafted)
+        and sum(value_for(row, spec) is not None for row in drafted)
         >= minimum_history
     ]
     if len(available_specs) < 3:
         return []
     distributions = {
-        spec.key: [parse_number(row.get(spec.key)) for row in drafted]
+        spec.key: [value_for(row, spec) for row in drafted]
         for spec in available_specs
     }
     ranked: list[
@@ -70,7 +82,7 @@ def _uncached_comparables(
         compared = 0
         for spec in available_specs:
             left = parse_number(candidate.get(spec.key))
-            right = parse_number(row.get(spec.key))
+            right = value_for(row, spec)
             if left is None or right is None:
                 continue
             delta = (left - right) / robust_scale(distributions[spec.key])

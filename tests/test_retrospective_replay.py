@@ -78,6 +78,24 @@ def _args(**overrides: object) -> argparse.Namespace:
 
 
 class RetrospectiveReplayToolTests(unittest.TestCase):
+    def test_row_audit_hash_ignores_manual_film_grades_and_provenance(self) -> None:
+        baseline = _history()
+        changed = [dict(row) for row in baseline]
+        changed[0].update(
+            {
+                "trait_vision": 99,
+                "film_grade_status": "complete",
+                "film_grader": "Synthetic Grader",
+                "film_graded_at": "2026-09-01",
+                "film_future_confidence": 0.99,
+            }
+        )
+
+        self.assertEqual(
+            replay_tool._canonical_rows_sha256(baseline),
+            replay_tool._canonical_rows_sha256(changed),
+        )
+
     def test_fresh_custom_cache_is_passed_to_history_builder(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             cache = Path(temporary) / "fresh-cache"

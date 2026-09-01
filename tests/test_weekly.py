@@ -252,6 +252,15 @@ class WeeklyTests(unittest.TestCase):
             "measurement_date": "2026-08-01",
             "measurements_verified": True,
             "trait_route_running": 88,
+            "film_grade_status": "complete",
+            "film_grader": "Synthetic Grader",
+            "film_graded_at": "2026-08-02",
+            "film_game_ids": "2026-week01-a;2026-week02-b;2026-week03-c",
+            "film_games_reviewed": 3,
+            "film_snaps_reviewed": 81,
+            "film_opponent_mix": "recent;strongest_available;adversity",
+            "film_grade_source": "synthetic_review",
+            "film_notes_path": "scouting/synthetic-notes.md",
             "draft_entry_probability": 0.65,
             "prod_receiving_yards": 900,
             "prod_yards_per_route": 3.1,
@@ -280,6 +289,11 @@ class WeeklyTests(unittest.TestCase):
         self.assertEqual(merged["measurement_source"], "verified_workout")
         self.assertTrue(merged["measurements_verified"])
         self.assertEqual(merged["trait_route_running"], 88)
+        self.assertEqual(merged["film_grade_status"], "complete")
+        self.assertEqual(merged["film_grader"], "Synthetic Grader")
+        self.assertEqual(merged["film_games_reviewed"], 3)
+        self.assertEqual(merged["film_snaps_reviewed"], 81)
+        self.assertEqual(merged["film_notes_path"], "scouting/synthetic-notes.md")
         self.assertEqual(merged["draft_entry_probability"], 0.65)
         self.assertEqual(merged["prod_receiving_yards"], 410)
         self.assertIsNone(merged.get("prod_yards_per_route"))

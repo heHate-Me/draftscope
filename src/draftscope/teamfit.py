@@ -5,7 +5,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from .mathstats import weighted_mean
-from .records import parse_number
+from .records import complete_film_grades_available, parse_number
 from .schema import PHYSICAL_KEYS_BY_POSITION, TRAITS, normalize_position
 
 
@@ -63,7 +63,9 @@ def _scheme_fit(player: Mapping[str, Any], profile: Mapping[str, Any], position:
     evidence_weight = 0.0
     possible_weight = 0.0
     strengths: list[tuple[float, str]] = []
-    keys = list(PHYSICAL_KEYS_BY_POSITION.get(position, ())) + [f"trait_{name}" for name in TRAITS.get(position, ())]
+    keys = list(PHYSICAL_KEYS_BY_POSITION.get(position, ()))
+    if complete_film_grades_available(player):
+        keys.extend(f"trait_{name}" for name in TRAITS.get(position, ()))
     for key in keys:
         importance = parse_number(profile.get(f"importance_{key}"))
         if importance is None or importance <= 0:

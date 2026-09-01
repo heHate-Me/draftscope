@@ -101,6 +101,27 @@ Generate the supported schemas rather than hand-copying column lists:
 
 Candidate measurements use inches, pounds, seconds, and repetitions. Position-specific production fields begin with `prod_`; manual film-rubric fields begin with `trait_`. Rate fields accept decimals or explicit percentages. Identity, checkpoint, measurement-source, and verification fields should remain attached to every row.
 
+### Manual film-grading workflow
+
+1. Generate or update the player row with `template players` or the weekly
+   refresh.
+2. Watch and record the required sample in the
+   [manual scouting rubric](SCOUTING_RUBRIC.md): at least three complete games,
+   the required game mix, and approximately 75 relevant snaps for a complete
+   evaluation.
+3. Complete the machine-readable
+   [scouting evidence template](examples/scouting_evidence_template.json), then
+   copy its portable provenance fields and supported grades into the player row.
+4. Run `./run_draftscope.py audit --players <player-file>`; do not discard or
+   conceal audit findings.
+5. Generate the report with `./run_draftscope.py scout "Player Name" --players <player-file> --lookback 10`, using the
+   [real 2027 report template](examples/real_2027_scouting_report_template.md)
+   for the underlying game evidence.
+6. Keep the model's draft probability, the manual scouting grade, and downstream
+   team-fit context separate. Provisional grades may be displayed but do not
+   enter the profile score or team fit; insufficient evidence receives no
+   numeric grade.
+
 A custom college history must contain the complete supported-position FBS roster risk set for each checkpoint, including no-stat players and players who did not enter that draft. Inputs may include only facts available then. Entrant-only, starter-only, statistical-qualifier, or known-prospect files change the contract and are invalid for `unconditional_next_draft`. Keep college and Combine stages explicitly labeled; use `--history` only with a complete, audited population.
 
 The legacy `build-weekly-history` command creates an entry-conditioned leaver/recorded-production cohort; it is not interchangeable with the full-roster primary model.
