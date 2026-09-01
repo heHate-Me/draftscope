@@ -3,9 +3,30 @@
 This report uses the entirely synthetic row in
 [`demo_players.csv`](demo_players.csv). `Demo Wide Receiver`, `Synthetic
 University`, and `Synthetic Conference` are not real people or organizations.
+The film grades, grader, game identifiers, sample counts, and opponent tags are
+also invented solely to demonstrate a structurally complete audit record. No
+game footage was reviewed, no play references are implied, and none of these
+values should be presented as real scouting work.
 The output was generated on 2026-08-28 after building the audited 2026
 preseason history. Exact probabilities, comparisons, team fits, and coverage
 notes can change when source snapshots or model history are refreshed.
+
+Synthetic film-provenance values used by the example:
+
+- Status: `complete` (structural demonstration only)
+- Grader: `Synthetic Example Grader`
+- Grading date: `2026-08-27`
+- Games: three explicitly synthetic identifiers
+- Relevant snaps: 81 synthetic sample snaps
+- Opponent mix: `recent;strongest_available;lower_production`
+- Source: `synthetic_demonstration_no_film`
+- Notes path: `examples/sample_scouting_report.md`
+
+For actual evaluations, follow the
+[`SCOUTING_RUBRIC.md`](../SCOUTING_RUBRIC.md), record genuine game-level
+evidence in the
+[`scouting_evidence_template.json`](scouting_evidence_template.json), and use
+`null` or a blank field instead of inventing unavailable evidence.
 
 Command:
 
@@ -28,6 +49,7 @@ Plain English: about 2 of 100 comparable checkpoint profiles were drafted in the
 Historical position baseline: 1.5% at the same checkpoint
 If drafted: comparable range #46–#167 (middle comparable #157)
 Data status: model inputs 11/12; broader scouting profile 76% complete
+Film grade status: COMPLETE — audited sample may inform scouting context.
 Broader profile: 67/100 — Draftable traits with development upside
 Historical model check: passed
 

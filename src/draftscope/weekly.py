@@ -40,7 +40,7 @@ from .records import (
     write_records,
 )
 from .reporting import render_board, render_evaluation
-from .schema import COMMON_PHYSICAL
+from .schema import COMMON_PHYSICAL, FILM_PROVENANCE_FIELDS
 from .tracking import (
     PromotionPolicy,
     TrackingError,
@@ -2144,8 +2144,8 @@ def _merge_discovered_player(
         "date_of_birth",
         "age_at_draft",
         "measurement_date",
-        "film_grade_source",
         "notes",
+        *FILM_PROVENANCE_FIELDS,
     }
     for key, value in existing.items():
         if value in (None, ""):

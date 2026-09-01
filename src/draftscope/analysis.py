@@ -14,7 +14,15 @@ from .model import (
     DraftProbabilityModel,
     ModelError,
 )
-from .records import DataError, load_records, normalize_name, parse_bool, parse_number
+from .records import (
+    DataError,
+    complete_film_grades_available,
+    film_grades_displayable,
+    load_records,
+    normalize_name,
+    parse_bool,
+    parse_number,
+)
 from .schema import CATEGORY_WEIGHTS, MetricSpec, all_specs, normalize_position
 from .teamfit import TeamFit, rank_team_fits
 
@@ -446,6 +454,10 @@ class ProspectEvaluator:
             if normalize_position(row.get("position")) == position
             and parse_bool(row.get("drafted")) is True
             and parse_number(row.get(spec.key)) is not None
+            and (
+                spec.category != "skills"
+                or complete_film_grades_available(row)
+            )
         ]
         if len(drafted) >= 5:
             return drafted, benchmark_reference
@@ -466,6 +478,10 @@ class ProspectEvaluator:
             if normalize_position(row.get("position")) == position
             and parse_bool(row.get("drafted")) is True
             and parse_number(row.get(spec.key)) is not None
+            and (
+                spec.category != "skills"
+                or complete_film_grades_available(row)
+            )
         ]
         if len(model_drafted) >= 5:
             return model_drafted, "drafted players (week-matched production cohort)"
@@ -618,12 +634,20 @@ class ProspectEvaluator:
             )
         return results
 
-    def _profile_score(self, position: str, categories: Sequence[CategoryScore]) -> tuple[float | None, float]:
+    def _profile_score(
+        self,
+        position: str,
+        categories: Sequence[CategoryScore],
+        *,
+        include_film: bool,
+    ) -> tuple[float | None, float]:
         weights = CATEGORY_WEIGHTS.get(position, CATEGORY_WEIGHTS["WR"])
         by_category = {item.category: item for item in categories}
         pairs: list[tuple[float | None, float]] = []
         evidence = 0.0
         for category, weight in weights.items():
+            if category == "skills" and not include_film:
+                continue
             item = by_category.get(category)
             if item and item.score is not None:
                 pairs.append((item.score, weight))
@@ -805,7 +829,12 @@ class ProspectEvaluator:
         values = pool.metric_values.get(key)
         if values is None:
             values = tuple(
-                parse_number(row.get(metric))
+                (
+                    parse_number(row.get(metric))
+                    if not metric.startswith("trait_")
+                    or complete_film_grades_available(row)
+                    else None
+                )
                 for row in pool.rows_by_position.get(position, ())
             )
             pool.metric_values[key] = values
@@ -1029,7 +1058,11 @@ class ProspectEvaluator:
                 model = DraftProbabilityModel(
                     history,
                     position=position,
-                    candidate_features=(spec.key for spec in all_specs(position)),
+                    candidate_features=(
+                        spec.key
+                        for spec in all_specs(position)
+                        if spec.category != "skills"
+                    ),
                     population=str(population),
                     model_stage=stage,
                     probability_kind=probability_kind,
@@ -1081,11 +1114,25 @@ class ProspectEvaluator:
         candidate["position"] = position
         history = self._aligned_history(candidate)
         model_history = history if reference_only else self._aligned_model_history(candidate)
-        benchmarks = self._benchmark_metrics(candidate, history)
-        categories = self._category_scores(candidate, benchmarks)
-        profile_score, evidence = self._profile_score(position, categories)
+        film_displayable = film_grades_displayable(candidate)
+        published_candidate = dict(candidate)
+        if not film_displayable:
+            for key in tuple(published_candidate):
+                if key.startswith("trait_"):
+                    published_candidate[key] = None
+        benchmarks = self._benchmark_metrics(published_candidate, history)
+        categories = self._category_scores(published_candidate, benchmarks)
+        complete_film = complete_film_grades_available(candidate)
+        profile_score, evidence = self._profile_score(
+            position,
+            categories,
+            include_film=complete_film,
+        )
+        profile_categories = {"physical", "production", "age"}
+        if complete_film:
+            profile_categories.add("skills")
         physical_comps = self._comparables(
-            candidate,
+            published_candidate,
             history,
             categories={"physical"},
             limit=8,
@@ -1093,14 +1140,14 @@ class ProspectEvaluator:
             use_benchmark_cohort=True,
         )
         overall_comps = self._comparables(
-            candidate,
+            published_candidate,
             history,
-            categories={"physical", "production", "skills", "age"},
+            categories=profile_categories,
             limit=8,
             use_benchmark_cohort=True,
         )
         historical_elite_comps = self._comparables(
-            candidate,
+            published_candidate,
             self.career_elite_history,
             categories={"physical"},
             limit=8,
@@ -1118,16 +1165,16 @@ class ProspectEvaluator:
         )
         pick_source = model_history if self.model_history is not self.history else history
         pick_comps = self._comparables(
-            candidate,
+            published_candidate,
             pick_source,
-            categories={"physical", "production", "skills", "age"},
+            categories={"physical", "production", "age"},
             use_benchmark_cohort=False,
             reference="full drafted history for pick-band support",
         )
         projection_physical_comps = [
             comp for comp in physical_comps if comp.features_compared >= 3
         ]
-        projection_comps = pick_comps or overall_comps or projection_physical_comps
+        projection_comps = pick_comps or projection_physical_comps
         pick_range = self._pick_range(projection_comps)
         warnings: list[str] = []
         fallback_reason = str(
@@ -1213,8 +1260,23 @@ class ProspectEvaluator:
         if not reference_only:
             for limitation in self.model_metadata.get("limitations", []):
                 warnings.append(str(limitation))
-        if any(parse_number(candidate.get(key)) is not None for key in ("trait_processing", "trait_route_running", "trait_coverage")):
-            warnings.append("Film traits are user grades; keep the same rubric and preferably use multiple graders.")
+        has_film_grades = any(
+            key.startswith("trait_") and parse_number(value) is not None
+            for key, value in candidate.items()
+        )
+        film_status = str(candidate.get("film_grade_status") or "").strip().lower()
+        if has_film_grades and complete_film:
+            warnings.append(
+                "Complete manual film grades use the documented rubric and may affect only scouting-profile, comparison, and team-fit context."
+            )
+        elif has_film_grades and film_status == "provisional" and film_displayable:
+            warnings.append(
+                "PROVISIONAL FILM GRADES — displayed for scouting context only; excluded from the overall profile score, comparisons, and team fit."
+            )
+        elif has_film_grades:
+            warnings.append(
+                "Manual film grades are not backed by a complete audited sample and are excluded from the overall profile score, comparisons, and team fit."
+            )
         prediction.warnings.extend(warning for warning in warnings if warning not in prediction.warnings)
         comp_source = projection_comps
         if reference_only:
@@ -1251,7 +1313,7 @@ class ProspectEvaluator:
         )
         window = (valid_years[0], valid_years[-1]) if valid_years else None
         return Evaluation(
-            player=candidate,
+            player=published_candidate,
             as_of_date=self.as_of_date,
             benchmark_window=window,
             profile_score=profile_score,
@@ -1273,7 +1335,7 @@ class ProspectEvaluator:
         )
 
     def rank(self, *, bootstrap: int = 0) -> list[Evaluation]:
-        evaluations: list[Evaluation] = []
+        evaluations: list[tuple[Evaluation, float | None]] = []
         for candidate in self.candidates:
             try:
                 if parse_bool(candidate.get("data_stale")) is True:
@@ -1281,19 +1343,34 @@ class ProspectEvaluator:
             except DataError:
                 continue
             try:
-                evaluations.append(self.evaluate(str(candidate.get("name") or ""), school=str(candidate.get("school") or ""), bootstrap=bootstrap))
+                evaluation = self.evaluate(
+                    str(candidate.get("name") or ""),
+                    school=str(candidate.get("school") or ""),
+                    bootstrap=bootstrap,
+                )
+                evaluation_player = getattr(evaluation, "player", candidate)
+                evaluation_categories = getattr(evaluation, "categories", ())
+                non_film_profile, _coverage = self._profile_score(
+                    normalize_position(evaluation_player.get("position")),
+                    evaluation_categories,
+                    include_film=False,
+                )
+                evaluations.append((evaluation, non_film_profile))
             except (DataError, ModelError):
                 continue
-        return sorted(
+        ranked = sorted(
             evaluations,
-            key=lambda item: (
-                _ranking_likelihood(item.draft_prediction) is not None,
-                _ranking_likelihood(item.draft_prediction) if _ranking_likelihood(item.draft_prediction) is not None else -1.0,
-                item.profile_score is not None,
-                item.profile_score if item.profile_score is not None else -1.0,
+            key=lambda pair: (
+                _ranking_likelihood(pair[0].draft_prediction) is not None,
+                _ranking_likelihood(pair[0].draft_prediction)
+                if _ranking_likelihood(pair[0].draft_prediction) is not None
+                else -1.0,
+                pair[1] is not None,
+                pair[1] if pair[1] is not None else -1.0,
             ),
             reverse=True,
         )
+        return [evaluation for evaluation, _non_film_profile in ranked]
 
 
 def _candidate_model_feature_observed(candidate: Mapping[str, Any], feature: str) -> bool:

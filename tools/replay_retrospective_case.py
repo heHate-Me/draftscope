@@ -47,6 +47,7 @@ from draftscope.sportsdataverse import SportsDataverseClient  # noqa: E402
 from draftscope.sportsdataverse_adapter import (  # noqa: E402
     SportsDataverseHistoricalClient,
 )
+from draftscope.model import is_manual_scouting_field  # noqa: E402
 from draftscope.schema import all_specs  # noqa: E402
 
 
@@ -107,9 +108,14 @@ def _integer(value: Any) -> int | None:
 def _canonical_rows_sha256(rows: Sequence[Mapping[str, Any]]) -> str:
     digest = hashlib.sha256()
     for row in rows:
+        model_audit_row = {
+            key: value
+            for key, value in row.items()
+            if not is_manual_scouting_field(key)
+        }
         digest.update(
             json.dumps(
-                dict(row),
+                model_audit_row,
                 sort_keys=True,
                 separators=(",", ":"),
                 ensure_ascii=False,
@@ -301,7 +307,11 @@ def build_case_result(args: argparse.Namespace) -> dict[str, Any]:
             "school",
             "position",
             "draft_year",
-            *(spec.key for spec in all_specs(position)),
+            *(
+                spec.key
+                for spec in all_specs(position)
+                if spec.category != "skills"
+            ),
         )
     )
     comparison_candidate = {
@@ -387,7 +397,8 @@ def build_case_result(args: argparse.Namespace) -> dict[str, Any]:
             "positive_match_coverage": metadata.get("positive_match_coverage"),
             "canonical_rows_sha256": _canonical_rows_sha256(rows),
             "row_hash_representation": (
-                "sorted-key JSON of each loaded in-memory row, in source order"
+                "sorted-key JSON of each model-relevant loaded row, in source order; "
+                "manual trait grades and film provenance are excluded"
             ),
             "source_manifest_sha256": source_sha256,
             "source_artifacts": source_artifacts,

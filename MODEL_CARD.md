@@ -85,8 +85,10 @@ Each position has an allow-listed set drawn from:
 The automatic SportsDataverse artifact does not currently populate advanced
 passing/rushing success fields, and public box scores do not provide complete
 route, blocking, pressure, or coverage charting. Manually entered film traits
-contribute to the scouting profile and prototype matching, not the trained
-draft-probability model.
+with a complete audited sample may contribute to the scouting profile and
+prototype matching. Provisional grades are display-only, and no manual grade or
+film-provenance field enters probability fitting, calibration, validation, or
+retrospective probability replay.
 
 Training uses regularized logistic regression with position-specific feature
 selection, bounded case-control negative sampling, intercept correction back to

@@ -129,6 +129,37 @@ TRAITS: dict[str, tuple[str, ...]] = {
 }
 
 
+FILM_GRADE_STATUSES = ("complete", "provisional", "insufficient")
+FILM_OPPONENT_MIX_VALUES = (
+    "recent",
+    "strongest_available",
+    "adversity",
+    "lower_production",
+    "different_game_script",
+)
+FILM_CONSENSUS_METHODS = (
+    "independent_average",
+    "lead_grader",
+    "discussion_consensus",
+)
+FILM_PROVENANCE_FIELDS = (
+    "film_grade_status",
+    "film_grader",
+    "film_graded_at",
+    "film_game_ids",
+    "film_games_reviewed",
+    "film_snaps_reviewed",
+    "film_opponent_mix",
+    "film_grade_source",
+    "film_notes_path",
+    "film_second_grader",
+    "film_second_grader_agreement",
+    "film_consensus_method",
+)
+MIN_COMPLETE_FILM_GAMES = 3
+MIN_COMPLETE_FILM_SNAPS = 75
+
+
 PRODUCTION: dict[str, tuple[tuple[str, str], ...]] = {
     "QB": (("pass_attempts", "higher"), ("pass_yards", "higher"), ("pass_tds", "higher"), ("rush_yards", "higher"), ("passing_success_plays", "higher"), ("passing_success_rate", "higher"), ("rushing_success_plays", "higher"), ("rushing_success_rate", "higher"), ("ppa_per_play", "higher"), ("usage_rate", "higher"), ("completion_pct", "higher"), ("completion_pct_over_expected", "higher"), ("yards_per_attempt", "higher"), ("td_rate", "higher"), ("interception_rate", "lower"), ("pressure_to_sack_rate", "lower"), ("explosive_play_rate", "higher"), ("games_started", "higher")),
     "RB": (("carries", "higher"), ("rush_yards", "higher"), ("scrimmage_yards", "higher"), ("touchdowns", "higher"), ("rushing_success_plays", "higher"), ("rushing_success_rate", "higher"), ("ppa_per_play", "higher"), ("usage_rate", "higher"), ("yards_per_carry", "higher"), ("yards_after_contact_per_attempt", "higher"), ("missed_tackles_forced_per_touch", "higher"), ("explosive_run_rate", "higher"), ("yards_per_touch", "higher"), ("target_share", "higher"), ("yards_per_route", "higher"), ("fumble_rate", "lower")),
@@ -240,6 +271,7 @@ BASE_PLAYER_FIELDS = (
     "measurement_source",
     "measurement_date",
     "measurements_verified",
+    *FILM_PROVENANCE_FIELDS,
 )
 
 

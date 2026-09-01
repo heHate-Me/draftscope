@@ -113,7 +113,12 @@ def _parser() -> argparse.ArgumentParser:
     lookup.add_argument("--out", required=True, help="CSV or JSON candidate file to create/update")
     lookup.add_argument("--week", type=int)
 
-    audit = sub.add_parser("audit", help="Check candidate data for duplicates, invalid positions, and impossible values")
+    audit = sub.add_parser(
+        "audit",
+        help=(
+            "Check identities, positions, ranges, and manual film-grade provenance/protocol"
+        ),
+    )
     audit.add_argument("--players", required=True)
 
     tracking = sub.add_parser(
@@ -706,7 +711,9 @@ def _audit_command(args: argparse.Namespace) -> int:
     rows = load_records(args.players)
     findings = audit_records(rows)
     if not findings:
-        print(f"PASS: {len(rows)} player rows; no duplicate, position, or range failures found.")
+        print(
+            f"PASS: {len(rows)} player rows; identity, position, range, and film-grade protocol checks passed."
+        )
         return 0
     for finding in findings:
         print(f"[{finding['severity'].upper()}] row {finding['row']} {finding['field']}: {finding['message']}")

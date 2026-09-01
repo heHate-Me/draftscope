@@ -3,7 +3,11 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from .analysis import Evaluation
-from .records import parse_number
+from .records import (
+    complete_film_grades_available,
+    film_grades_displayable,
+    parse_number,
+)
 from .schema import all_specs, normalize_position
 
 
@@ -139,6 +143,24 @@ def render_player_summary(
         )
     elif profile_coverage is not None:
         lines.append(f"Data status: broader scouting profile {_percent(profile_coverage)} complete")
+
+    film_status = str(player.get("film_grade_status") or "").strip().lower()
+    if film_status == "complete" and complete_film_grades_available(player):
+        lines.append("Film grade status: COMPLETE — audited sample may inform scouting context.")
+    elif film_status == "complete":
+        lines.append(
+            "Film grade status: COMPLETE CLAIM NOT AUDIT-ELIGIBLE — numeric grades are withheld and excluded."
+        )
+    elif film_status == "provisional" and film_grades_displayable(player):
+        lines.append(
+            "Film grade status: PROVISIONAL — displayed only; excluded from the overall profile and team fit."
+        )
+    elif film_status == "provisional":
+        lines.append(
+            "Film grade status: PROVISIONAL CLAIM NOT AUDIT-ELIGIBLE — numeric grades are withheld and excluded."
+        )
+    elif film_status == "insufficient":
+        lines.append("Film grade status: INSUFFICIENT — numeric trait grades are withheld.")
 
     profile_score = _float_or_none(data.get("profile_score"))
     if profile_score is not None and (profile_coverage or 0.0) >= 0.5:
@@ -445,6 +467,23 @@ def render_evaluation(result: Evaluation) -> str:
             f"Comprehensive profile coverage: {_percent(result.evidence_coverage)}",
         ]
     )
+    film_status = str(player.get("film_grade_status") or "").strip().lower()
+    if film_status == "complete" and complete_film_grades_available(player):
+        lines.append("Film grade status: COMPLETE — audited sample may inform scouting context.")
+    elif film_status == "complete":
+        lines.append(
+            "Film grade status: COMPLETE CLAIM NOT AUDIT-ELIGIBLE — numeric grades are withheld and excluded."
+        )
+    elif film_status == "provisional" and film_grades_displayable(player):
+        lines.append(
+            "Film grade status: PROVISIONAL — displayed only; excluded from the overall profile and team fit."
+        )
+    elif film_status == "provisional":
+        lines.append(
+            "Film grade status: PROVISIONAL CLAIM NOT AUDIT-ELIGIBLE — numeric grades are withheld and excluded."
+        )
+    elif film_status == "insufficient":
+        lines.append("Film grade status: INSUFFICIENT — numeric trait grades are withheld.")
     if result.projected_pick_range:
         low, middle, high = result.projected_pick_range
         lines.append(f"Full-history comparable pick band: {low:.0f}–{high:.0f} (median {middle:.0f}; conditional on being drafted)")

@@ -92,6 +92,35 @@ _RETROSPECTIVE_CONTRACT_FIELDS = (
 )
 
 
+def is_manual_scouting_field(field: object) -> bool:
+    """Return whether a field belongs to the manual film-grading namespace."""
+
+    name = str(field)
+    return name.startswith("trait_") or name.startswith("film_")
+
+
+def probability_model_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a source row onto data that may enter probability-model state."""
+
+    return {
+        key: value
+        for key, value in row.items()
+        if not is_manual_scouting_field(key)
+    }
+
+
+def probability_candidate_features(features: Iterable[str]) -> tuple[str, ...]:
+    """Remove every manual scouting field from a probability feature contract."""
+
+    return tuple(
+        dict.fromkeys(
+            str(feature)
+            for feature in features
+            if not is_manual_scouting_field(feature)
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class CollegeEvidenceRule:
     minimum_observed: int
@@ -416,7 +445,7 @@ class DraftProbabilityModel:
         self.model_stage = model_stage
         self.probability_kind = probability_kind
         self.allow_random_fallback = allow_random_fallback
-        self.candidate_features = tuple(candidate_features)
+        self.candidate_features = probability_candidate_features(candidate_features)
         self.contract = ProbabilityModelContract(
             model_stage=model_stage,
             probability_kind=probability_kind,
@@ -426,7 +455,12 @@ class DraftProbabilityModel:
             ),
             allowed_features=self.candidate_features,
         )
-        self.rows = [row for row in rows if row.get("position") == position and parse_bool(row.get("drafted")) is not None]
+        self.rows = [
+            probability_model_row(row)
+            for row in rows
+            if row.get("position") == position
+            and parse_bool(row.get("drafted")) is not None
+        ]
         row_stages = {str(row.get("model_stage")) for row in self.rows if row.get("model_stage")}
         row_kinds = {
             str(row.get("probability_kind"))
@@ -462,10 +496,10 @@ class DraftProbabilityModel:
         rows: Sequence[Mapping[str, Any]],
         labels: Sequence[int],
     ) -> tuple[list[dict[str, Any]], Any]:
-        return [dict(row) for row in rows], None
+        return [probability_model_row(row) for row in rows], None
 
     def _prepare_external_row(self, row: Mapping[str, Any], transformer: Any) -> dict[str, Any]:
-        return dict(row)
+        return probability_model_row(row)
 
     def _fit_probability_model(
         self,
@@ -1574,7 +1608,7 @@ class CollegeDraftProbabilityModel(DraftProbabilityModel):
         row: Mapping[str, Any],
         transformer: _CollegeContextEncoder,
     ) -> dict[str, Any]:
-        return _prepare_college_row(row, transformer)
+        return _prepare_college_row(probability_model_row(row), transformer)
 
     def _prepare_retrospective_holdout_row(
         self,
