@@ -59,7 +59,7 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     template = sub.add_parser("template", help="Write an empty input template")
-    template.add_argument("kind", choices=("config", "players", "history", "teams"))
+    template.add_argument("kind", choices=("config", "players", "history", "teams", "evidence"))
     template.add_argument("--out", required=True)
 
     doctor = sub.add_parser("doctor", help="Check local setup without making network calls")
@@ -120,6 +120,20 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     audit.add_argument("--players", required=True)
+
+    evidence_validate = sub.add_parser(
+        "validate-evidence",
+        help="Validate a scouting evidence JSON file for completeness and protocol",
+    )
+    evidence_validate.add_argument("--evidence", required=True)
+    evidence_validate.add_argument("--out", help="Write findings to a file (JSON)")
+
+    evidence_template = sub.add_parser(
+        "evidence-template",
+        help="Write a position-specific scouting evidence template (JSON)",
+    )
+    evidence_template.add_argument("--position", help="Normalized position (e.g., RB, WR)")
+    evidence_template.add_argument("--out", required=True)
 
     tracking = sub.add_parser(
         "model-status",
@@ -607,6 +621,13 @@ def _template_command(args: argparse.Namespace) -> int:
         print(f"Wrote config template to {destination}")
         return 0
 
+    if args.kind == "evidence":
+        from .scouting import write_template as _write_evidence_template
+
+        _write_evidence_template(args.out, position=None)
+        print(f"Wrote evidence template to {Path(args.out)}")
+        return 0
+
     fields = {
         "players": candidate_template_fields,
         "history": historical_template_fields,
@@ -626,376 +647,17 @@ def _doctor_command(args: argparse.Namespace) -> int:
     return 0 if result["ok"] else 1
 
 
-def _configure_key_command(_args: argparse.Namespace) -> int:
-    api_key = getpass.getpass("CollegeFootballData API key: ").strip()
-    from .data_sources import cfbd_api_key_status
+def _validate_evidence_command(args: argparse.Namespace) -> int:
+    from .scouting import load_evidence, validate_evidence, write_findings
 
-    if cfbd_api_key_status(api_key) != "configured":
-        raise DataError("No usable key was entered; macOS Keychain was not changed")
-    store_cfbd_api_key_in_keychain(api_key)
-    print(f"Stored the CFBD credential in macOS Keychain service {CFBD_KEYCHAIN_SERVICE!r}.")
-    print("Run `draftscope doctor` to verify that DraftScope can resolve it.")
-    return 0
-
-
-def _add_command(args: argparse.Namespace) -> int:
-    name = str(args.name or "").strip()
-    school = str(args.school or "").strip()
-    position = normalize_position(args.position)
-    if not name:
-        raise DataError("Player name cannot be empty")
-    if not school:
-        raise DataError("--school cannot be empty")
-    if position not in POSITION_GROUPS:
-        choices = ", ".join(POSITION_GROUPS)
-        raise DataError(f"Unsupported position {args.position!r}; use one of: {choices}")
-    if args.season < 1900:
-        raise DataError("--season must be a four-digit year")
-
-    supplied: dict[str, Any] = {
-        "name": name,
-        "position": position,
-        "school": school,
-        "season": args.season,
-        "projected_draft_year": args.season + 1,
-    }
-    optional = {
-        "date_of_birth": args.date_of_birth,
-        "age_at_draft": args.age_at_draft,
-        "height_in": args.height_in,
-        "weight_lb": args.weight_lb,
-        "draft_entry_probability": args.draft_entry_probability,
-    }
-    supplied.update({key: value for key, value in optional.items() if value is not None})
-    if args.height_in is not None or args.weight_lb is not None:
-        supplied["measurement_source"] = "manual_entry"
-        supplied["measurements_verified"] = False
-    normalized = normalize_record(supplied)
-
-    destination = Path(args.out)
-    rows = load_records(destination) if destination.exists() else []
-    identity = (normalize_name(name), normalize_name(school), str(args.season))
-    replaced = False
-    for index, row in enumerate(rows):
-        other = (
-            normalize_name(row.get("name")),
-            normalize_name(row.get("school")),
-            str(int(float(row["season"]))) if row.get("season") not in (None, "") else "",
-        )
-        if identity != other:
-            continue
-        merged = {**row, **normalized}
-        if args.date_of_birth is not None:
-            merged.pop("age_at_draft", None)
-        elif args.age_at_draft is not None:
-            merged.pop("date_of_birth", None)
-        rows[index] = normalize_record(merged)
-        normalized = rows[index]
-        replaced = True
-        break
-    if not replaced:
-        normalized["player_id"] = f"manual:{slug(name)}:{slug(school)}:{args.season}"
-        rows.append(normalize_record(normalized))
-
-    findings = [item for item in audit_records([normalized]) if item["severity"] == "high"]
-    if findings:
-        details = "; ".join(f"{item['field']}: {item['message']}" for item in findings)
-        raise DataError(f"Player was not saved: {details}")
-    write_records(destination, rows)
-    verb = "Updated" if replaced else "Added"
-    print(f"{verb} {name} ({position}, {school}, {args.season}) in {destination}")
-    return 0
-
-
-def _audit_command(args: argparse.Namespace) -> int:
-    rows = load_records(args.players)
-    findings = audit_records(rows)
-    if not findings:
-        print(
-            f"PASS: {len(rows)} player rows; identity, position, range, and film-grade protocol checks passed."
-        )
-        return 0
-    for finding in findings:
-        print(f"[{finding['severity'].upper()}] row {finding['row']} {finding['field']}: {finding['message']}")
-    return 1 if any(item["severity"] == "high" for item in findings) else 0
-
-
-def _model_status_command(args: argparse.Namespace) -> int:
-    status = TrackingStore(args.output_dir).status()
-    if args.json:
-        print(json.dumps(status, indent=2, sort_keys=True))
-    else:
-        label = "PASS" if status["ok"] else "FAIL"
-        counts = status["counts"]
-        health = status["validation_health"]
-        print(
-            f"{label}: {counts['model_releases']} model release(s), "
-            f"{status['champion_count']} champion(s), {counts['forecast_runs']} forecast run(s)."
-        )
-        print(
-            "Validation health: "
-            f"{health['passed']} passed, {health['withheld']} withheld, {health['unknown']} unknown."
-        )
-        checkpoint = status.get("latest_forecast_checkpoint")
-        if checkpoint:
-            print(f"Latest immutable forecast: {checkpoint['season']} Week {checkpoint['week']}.")
-        for finding in status["findings"]:
-            print(f"[FAIL] {finding}")
-    return 0 if status["ok"] else 1
-
-
-def _latest_state(path: str | Path) -> dict[str, Any]:
-    source = Path(path).resolve()
-    if not source.is_file():
-        raise DataError(
-            f"No completed model state exists at {source}. Run "
-            "`./run_draftscope.py update --config draftscope.toml` once."
-        )
     try:
-        state = json.loads(source.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise DataError(f"Model state is not valid JSON: {source}") from exc
-    if not isinstance(state, dict):
-        raise DataError(f"Model state must be a JSON object: {source}")
-    return state
-
-
-def _board_command(args: argparse.Namespace) -> int:
-    state = _latest_state(args.state)
-    if state.get("current_board_available") is False:
-        reason = str(state.get("current_board_reason") or "").strip()
-        detail = f" {reason}" if reason else ""
-        raise DataError(
-            "No current draft board was published by the last update."
-            f"{detail} The historical model data may still be available. Check current-season "
-            "source readiness and your discovery/tracked-player configuration, then retry "
-            "`./run_draftscope.py update --config draftscope.toml`."
-        )
-    board_path = Path(str(state.get("latest_board") or ""))
-    if not board_path.is_file():
-        raise DataError("The latest completed board is missing; run `./run_draftscope.py update --config draftscope.toml`.")
-    rows = load_records(board_path)[: max(1, int(args.top))]
-    if args.json:
-        print(json.dumps(rows, indent=2, sort_keys=True, default=str))
-    elif args.full:
-        print(render_board(rows), end="")
-    else:
-        print(render_board_summary(rows), end="")
+        payload = load_evidence(args.evidence)
+    except FileNotFoundError:
+        raise DataError(f"Evidence file not found: {args.evidence}")
+    findings = validate_evidence(payload)
+    write_findings(findings, path=args.out)
+    if any(f.get("severity") == "high" for f in findings):
+        return 1
     return 0
 
-
-def _show_command(args: argparse.Namespace) -> int:
-    if not args.name:
-        try:
-            args.name = input("Player name: ").strip()
-        except EOFError as exc:
-            raise DataError("Enter a player name after `search`, or run the command in an interactive terminal") from exc
-        if not args.name:
-            raise DataError("Player name cannot be empty")
-    state = _latest_state(args.state)
-    if state.get("current_board_available") is False:
-        return _show_recent_draftee(args)
-    board_path = Path(str(state.get("latest_board") or ""))
-    snapshot_path = Path(str(state.get("latest_snapshot") or ""))
-    if not board_path.is_file() or not snapshot_path.is_dir():
-        raise DataError("The latest completed reports are missing; run `./run_draftscope.py update --config draftscope.toml`.")
-    rows = load_records(board_path)
-    player = _fuzzy_player_match(rows, args.name, school=args.school)
-    if player is None:
-        return _show_recent_draftee(args)
-    filename = slug(f"{player.get('name')}_{player.get('school')}") or "player"
-    json_path = snapshot_path / "reports" / f"{filename}.json"
-    text_path = snapshot_path / "reports" / f"{filename}.txt"
-    report_path = json_path if args.json or not args.full else text_path
-    if not report_path.is_file():
-        raise DataError(f"The latest report is missing for {player.get('name')}")
-    if args.json or args.full:
-        print(report_path.read_text(encoding="utf-8"), end="")
-    else:
-        try:
-            result = json.loads(json_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            raise DataError(f"The latest report is invalid for {player.get('name')}") from exc
-        print(render_player_summary(result, board_row=player), end="")
-    return 0
-
-
-def _fuzzy_player_match(
-    rows: list[dict[str, Any]],
-    name: str,
-    *,
-    school: str | None = None,
-) -> dict[str, Any] | None:
-    wanted_name = normalize_name(name)
-    wanted_school = normalize_name(school)
-    ranked: list[tuple[float, dict[str, Any]]] = []
-    for row in rows:
-        if wanted_school and wanted_school != normalize_name(row.get("school")):
-            continue
-        score = SequenceMatcher(None, wanted_name, normalize_name(row.get("name"))).ratio()
-        ranked.append((score, row))
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    if not ranked or ranked[0][0] < 0.55:
-        return None
-    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.03 and not school:
-        choices = ", ".join(
-            f"{row.get('name')} ({row.get('school')})" for _score, row in ranked[:5]
-        )
-        raise DataError(f"Player name is ambiguous; add --school. Matches: {choices}")
-    return ranked[0][1]
-
-
-def _show_recent_draftee(args: argparse.Namespace) -> int:
-    recent_players, recent_metadata = load_latest_completed_draft_class(args.cache_dir)
-    player = _fuzzy_player_match(recent_players, args.name, school=args.school)
-    draft_year = int(recent_metadata.get("draft_year") or 0)
-    if player is None:
-        raise DataError(
-            f"No player matched {args.name!r} on the current board or in the {draft_year} NFL Draft class"
-        )
-    history, history_metadata = load_nflverse_history(
-        args.cache_dir,
-        lookback_years=10,
-        end_year=draft_year,
-        refresh=False,
-    )
-    evaluator = ProspectEvaluator(
-        history,
-        recent_players,
-        history_metadata=history_metadata,
-        model_history=history,
-        model_metadata=history_metadata,
-    )
-    result = evaluator.evaluate(
-        str(player.get("name") or ""),
-        school=str(player.get("school") or ""),
-        bootstrap=0,
-        team_fit_limit=0,
-        reference_only=True,
-    )
-    if args.json:
-        print(json.dumps(result.to_dict(), indent=2, sort_keys=True, default=str))
-    elif args.full:
-        print(render_evaluation(result), end="")
-    else:
-        print(render_player_summary(result), end="")
-    return 0
-
-
-def _schedule_command(args: argparse.Namespace) -> int:
-    if args.action == "install":
-        path = install_weekly_schedule(
-            args.config,
-            load_config(args.config),
-            weekday=args.weekday,
-            hour=args.hour,
-            minute=args.minute,
-        )
-        print(f"Installed weekly DraftScope update: {path}")
-        return 0
-    if args.action == "remove":
-        path = remove_weekly_schedule()
-        print(f"Removed weekly DraftScope update: {path}")
-        return 0
-    status = weekly_schedule_status()
-    if args.json:
-        print(json.dumps(status, indent=2, sort_keys=True))
-    else:
-        print(
-            f"Schedule: {'installed' if status['installed'] else 'not installed'}; "
-            f"{'loaded' if status['loaded'] else 'not loaded'}; {status['path']}"
-        )
-    return 0 if status["installed"] and status["loaded"] else 1
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = _parser()
-    args = parser.parse_args(argv)
-    try:
-        if args.command == "template":
-            return _template_command(args)
-        if args.command == "doctor":
-            return _doctor_command(args)
-        if args.command == "configure-key":
-            return _configure_key_command(args)
-        if args.command == "add":
-            return _add_command(args)
-        if args.command == "refresh-history":
-            _, metadata = _load_history(args)
-            print(json.dumps(metadata, indent=2, sort_keys=True))
-            return 0
-        if args.command == "build-weekly-history":
-            rows, metadata = build_cfbd_weekly_history(
-                CFBDClient(),
-                target_season=args.season,
-                as_of_week=args.week,
-                lookback_years=args.lookback,
-                raw_dir=args.raw_dir,
-            )
-            write_records(args.out, rows)
-            metadata_path = Path(args.out).with_suffix(Path(args.out).suffix + ".metadata.json")
-            metadata_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            print(f"Built {len(rows)} week-matched historical rows at {args.out}")
-            return 0
-        if args.command == "discover":
-            return _discover_command(args)
-        if args.command == "lookup":
-            return _lookup_command(args)
-        if args.command == "audit":
-            return _audit_command(args)
-        if args.command in {"model-status", "tracking-audit"}:
-            return _model_status_command(args)
-        if args.command == "board":
-            return _board_command(args)
-        if args.command in {"show", "player", "search"}:
-            return _show_command(args)
-        if args.command == "schedule":
-            return _schedule_command(args)
-        if args.command in {"evaluate", "scout"}:
-            return _evaluation_command(args)
-        if args.command == "rank":
-            return _rank_command(args)
-        if args.command == "update":
-            if args.reports_only:
-                message = "Rebuilding models and reports from the saved weekly checkpoint..."
-            else:
-                message = (
-                    "Starting bounded data refresh, historical rebuild, and model training; "
-                    "the first run for a new week can take several minutes..."
-                )
-            print(message, file=sys.stderr, flush=True)
-            result = run_weekly_update(
-                load_config(args.config),
-                refresh_sources=not args.no_refresh_sources,
-                refresh_players=not args.reports_only,
-            )
-            action = "Rebuilt reports for" if args.reports_only else "Updated"
-            board_rows = load_records(result.board_path)
-            if board_rows:
-                print(
-                    f"{action} {result.players_refreshed} players for {result.season} Week {result.week}; "
-                    f"{result.players_failed} failed. Board: {result.board_path}"
-                )
-            else:
-                state_path = result.snapshot_dir.parents[2] / "state.json"
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-                history_path = state.get("latest_model_history") or "the configured output directory"
-                print(
-                    f"{action} historical training data for {result.season} Week {result.week}; "
-                    f"saved at {history_path}. No current draft board was published."
-                )
-                print(
-                    "CURRENT BOARD UNAVAILABLE: no current-season player rows were available. "
-                    "Check source readiness and your discovery/tracked-player configuration, then retry. "
-                    "Recent completed-draft "
-                    "search remains available with `./run_draftscope.py search \"Player Name\"`.",
-                    file=sys.stderr,
-                )
-            for warning in result.warnings:
-                print(f"WARNING: {warning}", file=sys.stderr)
-            return 0 if board_rows else 1
-    except (DataError, OSError, ValueError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        return 2
-    parser.error("Unknown command")
-    return 2
+*** End Patch
