@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme-hero.png" alt="DraftScope football scouting and analytics hero" width="100%">
+  <img src="docs/readme-hero.png" alt="DraftScope prospect scouting and draft board hero" width="100%">
 </p>
 
 # DraftScope
